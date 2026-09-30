@@ -173,3 +173,34 @@ describe("update_section", () => {
     await expect(kernel.previewWrite({ ...request, targetPath: "outside.md", expectedSha256: read.sha256 })).rejects.toThrow(/outside the selected route/);
   });
 });
+
+describe("daily notes", () => {
+  async function dailyFixture() {
+    const f = await fixture();
+    f.kernel.config.vaults[0]!.routes.daily = { folder: "daily", type: "daily", status: "active", area: "life", policy: "auto" };
+    return f;
+  }
+  const base = { vaultId: "test", operation: "create", route: "daily", body: "Shipped phase two.", source: "test", sourceDate: "2026-09-30" };
+
+  it("reports a missing note, then finds it after creating", async () => {
+    const { kernel } = await dailyFixture();
+    await expect(kernel.dailyNote("test", "2026-09-30")).resolves.toMatchObject({ exists: false, path: "daily/2026-09-30.md" });
+    await kernel.applyWrite({ ...base, requestId: "request-0301", title: "Daily circle" });
+    const found = await kernel.dailyNote("test", "2026-09-30");
+    expect(found).toMatchObject({ exists: true, path: "daily/2026-09-30.md" });
+    expect(found.exists && found.content).toContain("Shipped phase two.");
+  });
+
+  it("prevents a second daily note for the same date even with another title", async () => {
+    const { kernel } = await dailyFixture();
+    await kernel.applyWrite({ ...base, requestId: "request-0302", title: "Daily circle" });
+    await expect(kernel.applyWrite({ ...base, requestId: "request-0303", title: "Evening review" })).rejects.toThrow(/already exists/);
+  });
+
+  it("requires a daily route and a valid date", async () => {
+    const { kernel } = await fixture();
+    await expect(kernel.dailyNote("test", "2026-09-30")).rejects.toThrow(/no daily route/);
+    const { kernel: k2 } = await dailyFixture();
+    await expect(k2.dailyNote("test", "30-09-2026")).rejects.toThrow(/YYYY-MM-DD/);
+  });
+});

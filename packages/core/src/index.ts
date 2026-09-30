@@ -274,6 +274,25 @@ export class LifeKernel {
     return hits;
   }
 
+  /** Look up the single daily note for a date (default: today in the configured time zone). */
+  async dailyNote(vaultId: string, date?: string, routeName?: string) {
+    const vault = this.vault(vaultId);
+    const day = date ?? localDate(this.config.timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("date must be YYYY-MM-DD.");
+    const candidates = Object.entries(vault.routes).filter(([name, route]) => route.type === "daily" && (!routeName || name === routeName));
+    if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no daily route${routeName ? ` named ${routeName}` : ""}.`);
+    if (candidates.length > 1) throw new Error("Several daily routes exist; pass routeName.");
+    const [name, route] = candidates[0]!;
+    const path = `${route.folder}/${day}.md`;
+    try {
+      const note = await this.readNote(vault.id, path);
+      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: true as const, path: note.path, content: note.content, sha256: note.sha256 };
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: false as const, path };
+    }
+  }
+
   private async proposed(requestInput: unknown): Promise<{ request: WriteRequest; absolute: string; path: string; before: string; after: string; preview: PreviewResult }> {
     const request = WriteRequestSchema.parse(requestInput);
     const vault = this.vault(request.vaultId);
@@ -284,7 +303,9 @@ export class LifeKernel {
 
     let path: string;
     if (request.operation === "create") {
-      path = `${route.folder}/${request.sourceDate}-${slugify(request.title)}.md`;
+      path = route.type === "daily"
+        ? `${route.folder}/${request.sourceDate}.md`
+        : `${route.folder}/${request.sourceDate}-${slugify(request.title)}.md`;
       if (request.targetPath) throw new Error("targetPath is not accepted for create operations.");
     } else {
       if (!request.targetPath) throw new Error(`targetPath is required for ${request.operation} operations.`);

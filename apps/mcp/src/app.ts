@@ -30,6 +30,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   app.get("/v1/vaults", (_req, res) => res.json(kernel.listVaults()));
   app.post("/v1/search", async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
   app.post("/v1/read", async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
+  app.post("/v1/daily", async (req, res, next) => { try { res.json(await kernel.dailyNote(req.body.vaultId, req.body.date, req.body.route)); } catch (e) { next(e); } });
   app.post("/v1/writes/preview", async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });
   app.post("/v1/writes/apply", async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body)); } catch (e) { next(e); } });
   app.post("/v1/validate", async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });

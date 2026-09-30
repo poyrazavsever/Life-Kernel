@@ -35,7 +35,7 @@ describe("MCP tools", () => {
     await client.connect(clientSide);
 
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["audit_recent", "note_read", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
+    expect(names).toEqual(["audit_recent", "daily_get", "note_read", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
 
     const search = await client.callTool({ name: "vault_search", arguments: { query: "needle" } });
     const text = (search.content as Array<{ text: string }>)[0]!.text;
