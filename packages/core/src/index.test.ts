@@ -204,3 +204,65 @@ describe("daily notes", () => {
     await expect(k2.dailyNote("test", "30-09-2026")).rejects.toThrow(/YYYY-MM-DD/);
   });
 });
+
+describe("context bundle", () => {
+  const note = (access: string, body: string) => `---\nid: x\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: ${access}\n---\n\n${body}\n`;
+
+  async function bundleFixture() {
+    const f = await fixture();
+    const vaultConfig = f.kernel.config.vaults[0]!;
+    vaultConfig.routes.daily = { folder: "daily", type: "daily", status: "active", area: "life", policy: "auto" };
+    vaultConfig.bundle = ["system/Method.md", "system/Secret.md", "system/Private.md", "system/Absent.md"];
+    await mkdir(join(f.vault, "system"));
+    await mkdir(join(f.vault, "daily"));
+    await writeFile(join(f.vault, "system/Method.md"), note("context", "Method body"), "utf8");
+    await writeFile(join(f.vault, "system/Secret.md"), note("none", "never"), "utf8");
+    await writeFile(join(f.vault, "system/Private.md"), note("restricted", "sensitive"), "utf8");
+    for (const day of ["2026-09-26", "2026-09-28", "2026-09-29", "2026-09-30", "2026-10-02"]) await writeFile(join(f.vault, `daily/${day}.md`), note("context", `Day ${day}`), "utf8");
+    return f;
+  }
+
+  it("includes bundle notes, today, and recent earlier days while reporting skips", async () => {
+    const { kernel } = await bundleFixture();
+    const bundle = await kernel.contextBundle("test", { date: "2026-09-30", recentDaily: 2 });
+    expect(bundle.notes.map((n) => n.path)).toEqual(["system/Method.md", "daily/2026-09-30.md", "daily/2026-09-29.md", "daily/2026-09-28.md"]);
+    expect(bundle.skipped).toEqual([
+      { path: "system/Secret.md", reason: "excluded" },
+      { path: "system/Private.md", reason: "restricted" },
+      { path: "system/Absent.md", reason: "missing" }
+    ]);
+    expect(JSON.stringify(bundle)).not.toMatch(/never|sensitive|2026-10-02/);
+  });
+
+  it("includes restricted notes only on request and truncates to the budget while keeping the full hash", async () => {
+    const { kernel } = await bundleFixture();
+    expect((await kernel.contextBundle("test", { date: "2026-09-30", includeRestricted: true })).notes.some((n) => n.path === "system/Private.md")).toBe(true);
+    const tiny = await kernel.contextBundle("test", { date: "2026-09-30", maxChars: 1000 });
+    expect(tiny.totalChars).toBeLessThanOrEqual(1000);
+    const full = await kernel.readNote("test", "system/Method.md");
+    expect(tiny.notes[0]).toMatchObject({ path: "system/Method.md", sha256: full.sha256, truncated: false });
+  });
+
+  it("lists today as missing when no daily note exists yet", async () => {
+    const { kernel } = await bundleFixture();
+    const bundle = await kernel.contextBundle("test", { date: "2026-09-27", recentDaily: 1 });
+    expect(bundle.skipped).toContainEqual({ path: "daily/2026-09-27.md", reason: "missing" });
+    expect(bundle.notes.map((n) => n.path)).toContain("daily/2026-09-26.md");
+  });
+});
+
+describe("backlinks", () => {
+  it("finds links by path or name, honors AI access, and excludes the target", async () => {
+    const { kernel, vault } = await fixture();
+    const note = (access: string, body: string) => `---\nid: x\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: ${access}\n---\n\n${body}\n`;
+    await mkdir(join(vault, "projects"));
+    await writeFile(join(vault, "projects/Alpha.md"), note("context", "Self link [[Alpha]]"), "utf8");
+    await writeFile(join(vault, "a.md"), note("context", "See [[projects/Alpha]] and later [[projects/Alpha|the project]]."), "utf8");
+    await writeFile(join(vault, "b.md"), note("context", "Mentions [[alpha#Tasks]] here."), "utf8");
+    await writeFile(join(vault, "hidden.md"), note("none", "Hidden [[Alpha]]"), "utf8");
+    await writeFile(join(vault, "unrelated.md"), note("context", "About [[Alphabet]]."), "utf8");
+    const hits = await kernel.backlinks("test", "projects/Alpha.md");
+    expect(hits.map((h) => h.path).sort()).toEqual(["a.md", "b.md"]);
+    await expect(kernel.backlinks("test", "../escape.md")).rejects.toThrow(/escapes/);
+  });
+});

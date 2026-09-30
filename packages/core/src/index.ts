@@ -19,7 +19,8 @@ const VaultSchema = z.object({
   kind: z.enum(["personal", "project", "research"]),
   path: z.string().min(1),
   mode: z.enum(["read-only", "read-write"]),
-  routes: z.record(RouteSchema).default({})
+  routes: z.record(RouteSchema).default({}),
+  bundle: z.array(z.string().min(1)).optional()
 });
 
 function isValidTimeZone(value: string): boolean {
@@ -89,6 +90,27 @@ function stableNoteId(vaultId: string, requestId: string): string {
 export function localDate(timeZone: string, at: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
+
+export const DEFAULT_BUNDLE = [
+  "AGENTS.md",
+  "system/AI Context.md",
+  "system/Method.md",
+  "state/Current State.md",
+  "profile/Profile.md",
+  "schedule/Capacity.md",
+  "schedule/Near-Term Plan.md"
+];
+
+export interface BundleNote { path: string; sha256: string; truncated: boolean; content: string }
+export interface ContextBundle {
+  vaultId: string;
+  date: string;
+  notes: BundleNote[];
+  skipped: Array<{ path: string; reason: "missing" | "excluded" | "restricted" | "budget" }>;
+  totalChars: number;
+}
+
+export interface Backlink { path: string; line: number; excerpt: string; sha256: string }
 
 function slugify(value: string): string {
   const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
@@ -291,6 +313,76 @@ export class LifeKernel {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: false as const, path };
     }
+  }
+
+  /**
+   * Assemble the minimum context for a session: the vault's bundle notes, today's daily note,
+   * and the most recent earlier daily notes, within a character budget.
+   * Each entry carries the hash of the full note so a later write can cite it.
+   */
+  async contextBundle(vaultId: string, options: { date?: string; includeRestricted?: boolean; maxChars?: number; recentDaily?: number } = {}): Promise<ContextBundle> {
+    const vault = this.vault(vaultId);
+    const date = options.date ?? localDate(this.config.timezone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    const includeRestricted = options.includeRestricted ?? false;
+    let remaining = Math.min(Math.max(options.maxChars ?? 24000, 1000), 200000);
+    const paths = [...(vault.bundle ?? DEFAULT_BUNDLE)];
+
+    const dailyRoute = Object.values(vault.routes).find((route) => route.type === "daily");
+    if (dailyRoute) {
+      let names: string[] = [];
+      try { names = await readdir(resolve(vault.path, dailyRoute.folder)); } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      const earlier = names.filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/.test(name)).map((name) => name.slice(0, 10)).filter((day) => day < date).sort().reverse();
+      const recent = [date, ...earlier.slice(0, Math.max(0, Math.min(options.recentDaily ?? 3, 14)))];
+      for (const day of recent) paths.push(`${dailyRoute.folder}/${day}.md`);
+    }
+
+    const notes: BundleNote[] = [];
+    const skipped: ContextBundle["skipped"] = [];
+    let totalChars = 0;
+    for (const path of [...new Set(paths)]) {
+      if (remaining <= 0) { skipped.push({ path, reason: "budget" }); continue; }
+      try {
+        const note = await this.readNote(vault.id, path, includeRestricted);
+        const truncated = note.content.length > remaining;
+        const content = truncated ? note.content.slice(0, remaining) : note.content;
+        remaining -= content.length;
+        totalChars += content.length;
+        notes.push({ path: note.path, sha256: note.sha256, truncated, content });
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") skipped.push({ path, reason: "missing" });
+        else if (error instanceof Error && /excluded from AI access/.test(error.message)) skipped.push({ path, reason: "excluded" });
+        else if (error instanceof Error && /restricted access/.test(error.message)) skipped.push({ path, reason: "restricted" });
+        else throw error;
+      }
+    }
+    return { vaultId: vault.id, date, notes, skipped, totalChars };
+  }
+
+  /** Find notes that link to a note with [[path]] or [[name]] wikilinks. Only AI-readable notes are searched. */
+  async backlinks(vaultId: string, path: string, includeRestricted = false, limit = 50): Promise<Backlink[]> {
+    const vault = this.vault(vaultId);
+    const target = resolveMarkdownPath(vault.path, path);
+    const targetPath = relative(vault.path, target).replaceAll("\\", "/").replace(/\.md$/i, "").toLowerCase();
+    const targetName = targetPath.split("/").pop()!;
+    const hits: Backlink[] = [];
+    for (const file of await markdownFiles(vault.path)) {
+      if (file === target) continue;
+      const content = await readFile(file, "utf8");
+      const access = aiAccessFor(content);
+      if (access === "none" || (access === "restricted" && !includeRestricted)) continue;
+      const lines = content.split(/\r?\n/);
+      for (let index = 0; index < lines.length && hits.length < limit; index += 1) {
+        const matches = [...lines[index]!.matchAll(/\[\[([^\]|#]+)/g)].map((match) => match[1]!.trim().replace(/\.md$/i, "").toLowerCase());
+        if (matches.some((link) => link === targetPath || link === targetName)) {
+          hits.push({ path: relative(vault.path, file).replaceAll("\\", "/"), line: index + 1, excerpt: lines[index]!.trim().slice(0, 240), sha256: sha256(content) });
+        }
+      }
+      if (hits.length >= limit) break;
+    }
+    return hits;
   }
 
   private async proposed(requestInput: unknown): Promise<{ request: WriteRequest; absolute: string; path: string; before: string; after: string; preview: PreviewResult }> {
