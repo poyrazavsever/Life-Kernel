@@ -28,3 +28,11 @@ Authenticated endpoints:
 - `POST /v1/validate`
 
 Search and read omit `restricted` notes unless the caller sets `includeRestricted: true`; `ai_access: none` is never returned. The write body follows the same request schema used by MCP. Reusing a `requestId` with identical content returns the prior result; reusing it with different content fails. Appends require the SHA-256 observed when the note was read.
+
+## Write operations
+
+- `create`: new note under the route folder, named `<sourceDate>-<title slug>.md`.
+- `append`: add text to the end of an existing note in the route folder.
+- `update_section`: replace the body under one heading (`section`) in an existing note in the route folder. Nested headings belong to their parent section. Fenced code and frontmatter are never treated as headings. An unknown or duplicated heading fails instead of guessing.
+
+Both modifying operations require `targetPath` and the `expectedSha256` from the last read, and they refresh `updated` in frontmatter when the note has that field.

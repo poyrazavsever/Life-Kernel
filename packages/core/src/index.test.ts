@@ -123,3 +123,53 @@ describe("route policy levels", () => {
     expect((await loadConfig(join(root, "c.json"))).vaults[0]!.routes.r!.policy).toBe("review");
   });
 });
+
+describe("update_section", () => {
+  const note = [
+    "---", 'id: "s"', 'type: "state"', 'status: "active"', 'area: "project"', 'privacy: "personal"', 'ai_access: "context"', 'updated: "2026-01-01"', "---", "",
+    "# Current state", "", "## Right now", "", "Old focus.", "", "```md", "## Waiting on", "```", "", "### Detail", "", "Nested stays with its parent.", "",
+    "## Waiting on", "", "Nothing.", ""
+  ].join("\n");
+
+  async function withNote() {
+    const f = await fixture();
+    await mkdir(join(f.vault, "sessions"));
+    await writeFile(join(f.vault, "sessions/state.md"), note, "utf8");
+    const read = await f.kernel.readNote("test", "sessions/state.md");
+    const request = { requestId: "request-0201", vaultId: "test", operation: "update_section", route: "session", title: "State", targetPath: "sessions/state.md", section: "Right now", expectedSha256: read.sha256, body: "New focus.", source: "test", sourceDate: "2026-09-30" };
+    return { ...f, request };
+  }
+
+  it("replaces one section including nested headings, ignores fenced headings, and bumps updated", async () => {
+    const { kernel, vault, request } = await withNote();
+    const preview = await kernel.previewWrite(request);
+    expect(preview.preview).toContain("New focus.");
+    await kernel.applyWrite(request);
+    const after = await readFile(join(vault, "sessions/state.md"), "utf8");
+    expect(after).toContain("## Right now\n\nNew focus.\n\n## Waiting on\n\nNothing.");
+    expect(after).not.toContain("Old focus.");
+    expect(after).not.toContain("Nested stays");
+    expect(after).toContain('updated: "2026-09-30"');
+    expect(after.startsWith("---\nid:")).toBe(true);
+  });
+
+  it("rejects unknown sections, ambiguous headings, missing section, and stale hashes", async () => {
+    const { kernel, request } = await withNote();
+    await expect(kernel.previewWrite({ ...request, section: "Missing" })).rejects.toThrow(/not found/);
+    await expect(kernel.previewWrite({ ...request, section: undefined })).rejects.toThrow(/section is required/);
+    await expect(kernel.previewWrite({ ...request, expectedSha256: "0".repeat(64) })).rejects.toThrow(/changed/);
+    await expect(kernel.previewWrite({ ...request, operation: "append" })).rejects.toThrow(/only accepted/);
+    const { vault, kernel: k2 } = await fixture();
+    await mkdir(join(vault, "sessions"));
+    await writeFile(join(vault, "sessions/dup.md"), "# A\n\n## Same\n\nx\n\n## Same\n\ny\n", "utf8");
+    const read = await k2.readNote("test", "sessions/dup.md");
+    await expect(k2.previewWrite({ ...request, requestId: "request-0202", targetPath: "sessions/dup.md", section: "Same", expectedSha256: read.sha256 })).rejects.toThrow(/ambiguous/);
+  });
+
+  it("stays inside the route folder", async () => {
+    const { kernel, vault, request } = await withNote();
+    await writeFile(join(vault, "outside.md"), note, "utf8");
+    const read = await kernel.readNote("test", "outside.md");
+    await expect(kernel.previewWrite({ ...request, targetPath: "outside.md", expectedSha256: read.sha256 })).rejects.toThrow(/outside the selected route/);
+  });
+});

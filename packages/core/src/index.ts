@@ -36,11 +36,12 @@ const ConfigSchema = z.object({
 export const WriteRequestSchema = z.object({
   requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/, "requestId must be 8-128 characters: letters, digits, dot, underscore, or hyphen."),
   vaultId: z.string().min(1),
-  operation: z.enum(["create", "append"]),
+  operation: z.enum(["create", "append", "update_section"]),
   route: z.string().min(1),
   title: z.string().min(1).max(180),
   body: z.string().min(1),
   targetPath: z.string().optional(),
+  section: z.string().trim().min(1).max(180).optional(),
   expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   source: z.string().min(1),
   sourceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -64,7 +65,7 @@ export interface PreviewResult {
   requestId: string;
   vaultId: string;
   path: string;
-  operation: "create" | "append";
+  operation: WriteRequest["operation"];
   policy: RoutePolicy;
   beforeSha256: string | null;
   afterSha256: string;
@@ -118,6 +119,58 @@ function isInside(root: string, candidate: string): boolean {
   const resolvedRoot = resolve(root);
   const resolvedCandidate = resolve(candidate);
   return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`);
+}
+
+function detectEol(content: string): string {
+  return content.includes("\r\n") ? "\r\n" : "\n";
+}
+
+function frontmatterEnd(lines: string[]): number {
+  if (lines[0]?.trim() !== "---") return 0;
+  for (let index = 1; index < lines.length; index += 1) if (lines[index]!.trim() === "---") return index + 1;
+  return 0;
+}
+
+function bumpUpdated(content: string, today: string): string {
+  const lines = content.split(/\r?\n/);
+  const end = frontmatterEnd(lines);
+  for (let index = 1; index < end - 1; index += 1) {
+    if (/^updated:/.test(lines[index]!)) {
+      lines[index] = `updated: ${yamlValue(today)}`;
+      return lines.join(detectEol(content));
+    }
+  }
+  return content;
+}
+
+/** Replace the body under one heading, up to the next heading of the same or higher level. */
+export function replaceSection(content: string, heading: string, body: string): { content: string; section: string } {
+  const eol = detectEol(content);
+  const lines = content.split(/\r?\n/);
+  const wanted = heading.replace(/^#+\s*/, "").trim();
+  const headings: Array<{ index: number; level: number; text: string }> = [];
+  let fence: string | null = null;
+  for (let index = frontmatterEnd(lines); index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]![0]!;
+      if (!fence) fence = marker;
+      else if (marker === fence) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const match = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+    if (match) headings.push({ index, level: match[1]!.length, text: match[2]!.trim() });
+  }
+  const matches = headings.filter((candidate) => candidate.text === wanted);
+  if (matches.length === 0) throw new Error(`Section not found: ${wanted}`);
+  if (matches.length > 1) throw new Error(`Section heading is ambiguous: ${wanted}`);
+  const target = matches[0]!;
+  const next = headings.find((candidate) => candidate.index > target.index && candidate.level <= target.level);
+  const replacement = [lines[target.index]!, "", ...body.trim().split(/\r?\n/), ""];
+  const rebuilt = [...lines.slice(0, target.index), ...replacement, ...(next ? lines.slice(next.index) : [])];
+  return { content: rebuilt.join(eol).replace(/(\r?\n)*$/, eol), section: replacement.join(eol).trim() };
 }
 
 export function resolveMarkdownPath(root: string, relativePath: string): string {
@@ -234,7 +287,7 @@ export class LifeKernel {
       path = `${route.folder}/${request.sourceDate}-${slugify(request.title)}.md`;
       if (request.targetPath) throw new Error("targetPath is not accepted for create operations.");
     } else {
-      if (!request.targetPath) throw new Error("targetPath is required for append operations.");
+      if (!request.targetPath) throw new Error(`targetPath is required for ${request.operation} operations.`);
       path = request.targetPath;
     }
 
@@ -247,11 +300,14 @@ export class LifeKernel {
       if (code !== "ENOENT") throw error;
     }
 
-    if (request.operation === "append" && !isInside(routeRoot, absolute)) throw new Error("Append target is outside the selected route folder.");
-    if (request.operation === "append" && aiAccessFor(before) === "none") throw new Error("This note is excluded from AI access.");
+    const modifies = request.operation !== "create";
+    if (modifies && !isInside(routeRoot, absolute)) throw new Error("Write target is outside the selected route folder.");
+    if (modifies && aiAccessFor(before) === "none") throw new Error("This note is excluded from AI access.");
     if (request.operation === "create" && before) throw new Error(`Note already exists: ${path}`);
-    if (request.operation === "append" && !before) throw new Error(`Append target does not exist: ${path}`);
-    if (request.operation === "append" && !request.expectedSha256) throw new Error("expectedSha256 is required for append operations.");
+    if (modifies && !before) throw new Error(`Write target does not exist: ${path}`);
+    if (modifies && !request.expectedSha256) throw new Error(`expectedSha256 is required for ${request.operation} operations.`);
+    if (request.operation === "update_section" && !request.section) throw new Error("section is required for update_section operations.");
+    if (request.operation !== "update_section" && request.section) throw new Error("section is only accepted for update_section operations.");
     if (request.expectedSha256 && sha256(before) !== request.expectedSha256) throw new Error("Target note changed after it was read; refresh and preview again.");
 
     const now = localDate(this.config.timezone);
@@ -275,9 +331,17 @@ export class LifeKernel {
       request.body.trim(),
       ""
     ].join("\n");
-    const after = request.operation === "create" ? created : `${before.trimEnd()}\n\n${request.body.trim()}\n`;
+    let after: string;
+    let shown = "";
+    if (request.operation === "create") after = created;
+    else if (request.operation === "append") after = bumpUpdated(`${before.trimEnd()}\n\n${request.body.trim()}\n`, now);
+    else {
+      const replaced = replaceSection(before, request.section!, request.body);
+      after = bumpUpdated(replaced.content, now);
+      shown = replaced.section;
+    }
     const canonicalPath = relative(vault.path, absolute).replaceAll("\\", "/");
-    const preview: PreviewResult = {
+    const result: PreviewResult = {
       requestId: request.requestId,
       vaultId: vault.id,
       path: canonicalPath,
@@ -286,9 +350,9 @@ export class LifeKernel {
       beforeSha256: before ? sha256(before) : null,
       afterSha256: sha256(after),
       changedBytes: Buffer.byteLength(after) - Buffer.byteLength(before),
-      preview: after.slice(0, 4000)
+      preview: (shown || after).slice(0, 4000)
     };
-    return { request, absolute, path: canonicalPath, before, after, preview };
+    return { request, absolute, path: canonicalPath, before, after, preview: result };
   }
 
   async previewWrite(request: unknown): Promise<PreviewResult> {
