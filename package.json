@@ -3,15 +3,21 @@
   "version": "0.1.0-dev",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
-  "engines": { "node": ">=22" },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build",
     "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck",
     "test": "npm run test --workspaces --if-present",
     "dev:stdio": "npm --workspace @lifekernel/mcp run dev:stdio",
     "dev:http": "npm --workspace @lifekernel/mcp run dev:http",
-    "cli": "npm --workspace @lifekernel/cli run dev --"
+    "cli": "npm --workspace @lifekernel/cli run dev --",
+    "fixture": "node scripts/validate-fixture.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
@@ -20,4 +26,3 @@
     "vitest": "^5.0.2"
   }
 }
-

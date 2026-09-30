@@ -19,14 +19,19 @@ const VaultSchema = z.object({
   routes: z.record(RouteSchema).default({})
 });
 
+function isValidTimeZone(value: string): boolean {
+  try { new Intl.DateTimeFormat("en-CA", { timeZone: value }); return true; } catch { return false; }
+}
+
 const ConfigSchema = z.object({
   version: z.literal(1),
   stateDir: z.string().default("./.lifekernel-data"),
+  timezone: z.string().refine(isValidTimeZone, "Unknown IANA time zone.").default(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
   vaults: z.array(VaultSchema).min(1)
 });
 
 export const WriteRequestSchema = z.object({
-  requestId: z.string().min(8),
+  requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/, "requestId must be 8-128 characters: letters, digits, dot, underscore, or hyphen."),
   vaultId: z.string().min(1),
   operation: z.enum(["create", "append"]),
   route: z.string().min(1),
@@ -73,6 +78,10 @@ function stableNoteId(vaultId: string, requestId: string): string {
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function localDate(timeZone: string, at: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
 }
 
 function slugify(value: string): string {
@@ -236,7 +245,7 @@ export class LifeKernel {
     if (request.operation === "append" && !request.expectedSha256) throw new Error("expectedSha256 is required for append operations.");
     if (request.expectedSha256 && sha256(before) !== request.expectedSha256) throw new Error("Target note changed after it was read; refresh and preview again.");
 
-    const now = new Date().toISOString().slice(0, 10);
+    const now = localDate(this.config.timezone);
     const created = [
       "---",
       `id: ${yamlValue(stableNoteId(vault.id, request.requestId))}`,

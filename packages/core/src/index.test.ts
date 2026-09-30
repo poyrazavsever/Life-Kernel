@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LifeKernel, resolveMarkdownPath, type LifeKernelConfig } from "./index.js";
+import { LifeKernel, localDate, resolveMarkdownPath, type LifeKernelConfig } from "./index.js";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "lifekernel-"));
@@ -11,6 +11,7 @@ async function fixture() {
   const config: LifeKernelConfig = {
     version: 1,
     stateDir: join(root, "state"),
+    timezone: "UTC",
     vaults: [{ id: "test", kind: "project", path: vault, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "project" } } }]
   };
   return { root, vault, kernel: new LifeKernel(config) };
@@ -74,5 +75,22 @@ describe("route policy", () => {
     await writeFile(join(vault, "outside.md"), "---\nid: outside\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: context\n---\n\n# Outside\n", "utf8");
     const target = await kernel.readNote("test", "outside.md");
     await expect(kernel.previewWrite({ requestId: "request-0003", vaultId: "test", operation: "append", route: "session", title: "Outside", targetPath: "outside.md", expectedSha256: target.sha256, body: "Should fail", source: "test", sourceDate: "2026-09-30" })).rejects.toThrow(/outside the selected route/);
+  });
+});
+
+describe("request identity", () => {
+  it("rejects request IDs that could escape the receipt directory", async () => {
+    const { kernel } = await fixture();
+    for (const requestId of ["../../escape-me", "a/b/c/d/e/f/g/h", "short", "bad id with spaces"]) {
+      await expect(kernel.applyWrite({ requestId, vaultId: "test", operation: "create", route: "session", title: "T", body: "B", source: "test", sourceDate: "2026-09-30" })).rejects.toThrow(/requestId/);
+    }
+  });
+});
+
+describe("time zone", () => {
+  it("formats the local calendar date instead of the UTC date", () => {
+    const at = new Date("2026-09-30T22:30:00Z");
+    expect(localDate("UTC", at)).toBe("2026-09-30");
+    expect(localDate("Europe/Istanbul", at)).toBe("2026-10-01");
   });
 });

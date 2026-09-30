@@ -1,59 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
-import { randomUUID } from "node:crypto";
-import express, { type Request, type Response, type NextFunction } from "express";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { LifeKernel, loadConfig } from "@lifekernel/core";
-import { createLifeKernelMcp } from "./server.js";
+import { createHttpApp } from "./app.js";
 
 const host = process.env.LIFEKERNEL_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEKERNEL_PORT ?? "8787");
 const token = process.env.LIFEKERNEL_API_TOKEN;
-if (!token || token.length < 24) throw new Error("LIFEKERNEL_API_TOKEN must contain at least 24 characters.");
+if (!token) throw new Error("LIFEKERNEL_API_TOKEN must contain at least 24 characters.");
 const origins = new Set((process.env.LIFEKERNEL_ALLOWED_ORIGINS ?? "").split(",").map((v) => v.trim()).filter(Boolean));
 const kernel = new LifeKernel(await loadConfig(process.env.LIFEKERNEL_CONFIG ?? "./lifekernel.config.json"));
-const app = createMcpExpressApp({ host });
-app.use(express.json({ limit: "1mb" }));
-
-app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: "0.1.0-dev" }));
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const origin = req.header("origin");
-  if (origin && !origins.has(origin)) return res.status(403).json({ error: "Origin is not allowed." });
-  const provided = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const expected = Buffer.from(token);
-  const actual = Buffer.from(provided);
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return res.status(401).json({ error: "Unauthorized" });
-  next();
-});
-
-app.get("/v1/vaults", (_req, res) => res.json(kernel.listVaults()));
-app.post("/v1/search", async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
-app.post("/v1/read", async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
-app.post("/v1/writes/preview", async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });
-app.post("/v1/writes/apply", async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body)); } catch (e) { next(e); } });
-app.post("/v1/validate", async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });
-
-const transports = new Map<string, StreamableHTTPServerTransport>();
-app.all("/mcp", async (req: Request, res: Response) => {
-  try {
-    const sessionId = req.header("mcp-session-id");
-    let transport = sessionId ? transports.get(sessionId) : undefined;
-    if (!transport && req.method === "POST" && isInitializeRequest(req.body)) {
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => { transports.set(id, transport!); }
-      });
-      transport.onclose = () => { if (transport?.sessionId) transports.delete(transport.sessionId); };
-      await createLifeKernelMcp(kernel).connect(transport);
-    }
-    if (!transport) return res.status(400).json({ error: "Missing or invalid MCP session." });
-    await transport.handleRequest(req, res, req.body);
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-  }
-});
-
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => res.status(400).json({ error: error instanceof Error ? error.message : String(error) }));
-app.listen(port, host, () => process.stderr.write(`Life Kernel listening on http://${host}:${port}\n`));
+const app = createHttpApp(kernel, { token, origins, host });
+app.listen(port, host, () => process.stderr.write(`Life Kernel listening on http://${host}:${port}
+`));
