@@ -13,9 +13,10 @@ Current controls:
 - request-ID idempotency receipts;
 - expected SHA-256 on appends;
 - JSONL mutation audit;
-- bearer authentication, constant-time token comparison, origin validation, request-size limit, and loopback default;
+- bearer authentication with constant-time comparison, OAuth access control with failed-login lockout, origin validation, host validation behind a proxy, request-size limit, and loopback default;
+- read-only connections: tokens without the write scope cannot preview or apply writes, over REST or MCP;
 - no delete, rename, shell, or arbitrary-path mutation.
 
-The developer preview uses a shared bearer token for one trusted user. It is not a multi-user authorization system. OAuth, revocable scopes, rate limits, and formal backup restore tests remain release gates for a stable public remote mode.
+Remote access has two modes. A static bearer token suits a trusted client such as Claude Code. OAuth 2.1 (dynamic client registration, PKCE, owner-secret consent, rotating refresh tokens, `lifekernel:read` and `lifekernel:write` scopes, resource-bound tokens) suits ChatGPT and Claude.ai; see [remote mode](remote.md). Both serve one trusted user and are not a multi-user authorization system. Remaining release gates for a stable public remote mode are live verification against ChatGPT and Claude.ai, and a formal backup restore test.
 
 `approved` is an attestation made by the calling agent, not a cryptographic proof. It keeps an agent from applying a review-level write by accident; the real gate is the MCP client's own tool approval and the skill's rule to show the preview first.

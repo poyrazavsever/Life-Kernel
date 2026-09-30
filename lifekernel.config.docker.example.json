@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "stateDir": "/state",
+  "timezone": "UTC",
+  "vaults": [
+    {
+      "id": "personal",
+      "kind": "personal",
+      "path": "/vaults/personal",
+      "mode": "read-write",
+      "routes": {
+        "session": {
+          "folder": "sessions",
+          "type": "session",
+          "status": "active",
+          "area": "system",
+          "policy": "auto"
+        },
+        "daily": {
+          "folder": "daily",
+          "type": "daily",
+          "status": "active",
+          "area": "life",
+          "policy": "auto"
+        },
+        "review": {
+          "folder": "reviews",
+          "type": "weekly-review",
+          "status": "active",
+          "area": "life",
+          "policy": "auto"
+        },
+        "decision": {
+          "folder": "decisions",
+          "type": "decision",
+          "status": "proposed",
+          "area": "system",
+          "policy": "review"
+        },
+        "goal": {
+          "folder": "goals",
+          "type": "goal",
+          "status": "active",
+          "area": "life",
+          "policy": "review"
+        },
+        "project": {
+          "folder": "projects",
+          "type": "project",
+          "status": "active",
+          "area": "projects",
+          "policy": "review"
+        },
+        "plan": {
+          "folder": "schedule",
+          "type": "plan",
+          "status": "active",
+          "area": "life",
+          "policy": "auto"
+        },
+        "inbox": {
+          "folder": "inbox",
+          "type": "note",
+          "status": "inbox",
+          "area": "system",
+          "policy": "auto"
+        },
+        "state": {
+          "folder": "state",
+          "type": "state",
+          "status": "active",
+          "area": "life",
+          "policy": "auto"
+        },
+        "profile": {
+          "folder": "profile",
+          "type": "profile",
+          "status": "active",
+          "area": "life",
+          "policy": "review"
+        },
+        "method": {
+          "folder": "system",
+          "type": "method",
+          "status": "active",
+          "area": "system",
+          "policy": "review"
+        },
+        "area": {
+          "folder": "areas",
+          "type": "area",
+          "status": "active",
+          "area": "life",
+          "policy": "review"
+        }
+      }
+    }
+  ]
+}

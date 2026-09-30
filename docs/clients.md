@@ -39,4 +39,4 @@ If a client does not pick the behavior up on its own, add one line to its instru
 
 ## Remote clients
 
-ChatGPT and Claude.ai connect over HTTPS and cannot run a local process. They need the remote HTTP mode, which is covered in the self-hosting guide.
+ChatGPT and Claude.ai connect over HTTPS and cannot run a local process. They need the OAuth-enabled remote mode; see [remote mode](remote.md).
