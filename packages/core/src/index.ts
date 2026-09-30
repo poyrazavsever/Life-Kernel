@@ -496,7 +496,8 @@ export class LifeKernel {
     });
     const result = { ...proposed.preview, appliedAt: new Date().toISOString() };
     await writeFile(receiptPath, JSON.stringify({ fingerprint, result }, null, 2), "utf8");
-    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_applied", ...result, source: request.source })}\n`, "utf8");
+    const { preview: _content, ...auditable } = result; // the audit log records what changed, never note text
+    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_applied", ...auditable, source: request.source })}\n`, "utf8");
     return { replayed: false, ...result };
   }
 

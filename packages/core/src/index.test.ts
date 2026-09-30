@@ -266,3 +266,14 @@ describe("backlinks", () => {
     await expect(kernel.backlinks("test", "../escape.md")).rejects.toThrow(/escapes/);
   });
 });
+
+describe("audit log", () => {
+  it("records the change without copying note text", async () => {
+    const { kernel } = await fixture();
+    await kernel.applyWrite({ requestId: "request-0401", vaultId: "test", operation: "create", route: "session", title: "Private", body: "Highly personal sentence.", source: "test", sourceDate: "2026-09-30" });
+    const [event] = await kernel.recentAudit(1);
+    expect(event).toMatchObject({ event: "write_applied", path: "sessions/2026-09-30-private.md", operation: "create" });
+    expect(JSON.stringify(event)).not.toContain("Highly personal sentence");
+    expect(event).not.toHaveProperty("preview");
+  });
+});

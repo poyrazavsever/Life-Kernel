@@ -55,7 +55,7 @@ After connecting, say "Set up my Life Kernel vault." The agent loads the onboard
 
 - **Revoke one client:** disconnect the connector in the client. Its tokens stop working when they expire (one hour) and the refresh token is rotated away.
 - **Revoke everything:** delete `oauth.json` from the state directory and restart; then rotate `LIFEKERNEL_OWNER_SECRET`.
-- **Audit:** `audit.jsonl` records client registration, approvals, denials, failed sign-ins, and every applied write. It never contains secrets or tokens.
+- **Audit:** `audit.jsonl` records client registration, approvals, denials, failed sign-ins, and every applied write (path, hashes, and size, never note text). It never contains secrets or tokens.
 - **Failed sign-ins:** five wrong owner secrets from one address lock the consent page for 15 minutes.
 - **Back up** the vault and the state directory.
 
