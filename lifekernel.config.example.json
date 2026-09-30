@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "stateDir": "./.lifekernel-data",
+  "vaults": [
+    {
+      "id": "personal",
+      "kind": "personal",
+      "path": "./vaults/personal",
+      "mode": "read-write",
+      "routes": {
+        "session": { "folder": "sessions", "type": "session", "status": "active", "area": "system" },
+        "daily": { "folder": "daily", "type": "daily", "status": "active", "area": "life" },
+        "project": { "folder": "projects", "type": "project", "status": "active", "area": "projects" },
+        "inbox": { "folder": "inbox", "type": "note", "status": "inbox", "area": "system" }
+      }
+    }
+  ]
+}

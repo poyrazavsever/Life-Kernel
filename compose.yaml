@@ -1,0 +1,19 @@
+services:
+  lifekernel:
+    build: .
+    restart: unless-stopped
+    environment:
+      LIFEKERNEL_CONFIG: /config/lifekernel.config.json
+      LIFEKERNEL_API_TOKEN: ${LIFEKERNEL_API_TOKEN:?set LIFEKERNEL_API_TOKEN}
+      LIFEKERNEL_HOST: 0.0.0.0
+      LIFEKERNEL_PORT: 8787
+      LIFEKERNEL_ALLOWED_ORIGINS: ${LIFEKERNEL_ALLOWED_ORIGINS:-}
+    volumes:
+      - ./lifekernel.config.json:/config/lifekernel.config.json:ro
+      - ./vaults:/vaults
+      - lifekernel-state:/state
+    ports:
+      - "127.0.0.1:8787:8787"
+
+volumes:
+  lifekernel-state:
