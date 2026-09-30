@@ -1,7 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { LifeKernel, WriteRequestSchema } from "@lifekernel/core";
+import { SCOPE_WRITE } from "./scopes.js";
 import { loadSkills, type Skill } from "./skills.js";
+
+// Local stdio has no auth info and is fully trusted; remote connections must carry the write scope.
+function assertWritable(extra: { authInfo?: { scopes: string[] } }): void {
+  if (extra.authInfo && !extra.authInfo.scopes.includes(SCOPE_WRITE)) throw new Error("This connection is read-only; reconnect and allow writing to change notes.");
+}
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
 
@@ -39,8 +45,8 @@ export function createLifeKernelMcp(kernel: LifeKernel, skills: Skill[] = loadSk
   server.tool("daily_get", "Return the single daily note for a date (default today in the configured time zone), or report that it does not exist yet.", { vaultId: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), route: z.string().optional() }, async (input) => json(await kernel.dailyNote(input.vaultId, input.date, input.route)));
   server.tool("context_bundle", "Return the minimum session context: the vault's bundle notes, today's daily note, and recent daily notes, within a character budget. Each note includes the hash of the full note.", { vaultId: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), maxChars: z.number().int().min(1000).max(200000).default(24000), recentDaily: z.number().int().min(0).max(14).default(3), includeRestricted: z.boolean().default(false) }, async (input) => json(await kernel.contextBundle(input.vaultId, input)));
   server.tool("note_backlinks", "List notes that link to a given note, with line excerpts.", { vaultId: z.string(), path: z.string(), limit: z.number().int().min(1).max(100).default(50), includeRestricted: z.boolean().default(false) }, async (input) => json(await kernel.backlinks(input.vaultId, input.path, input.includeRestricted, input.limit)));
-  server.tool("write_preview", "Preview a routed create or append without changing the vault.", { request: WriteRequestSchema }, async (input) => json(await kernel.previewWrite(input.request)));
-  server.tool("write_apply", "Apply a previously reviewed write request idempotently and record an audit event.", { request: WriteRequestSchema }, async (input) => json(await kernel.applyWrite(input.request)));
+  server.tool("write_preview", "Preview a routed create or append without changing the vault.", { request: WriteRequestSchema }, async (input, extra) => { assertWritable(extra); return json(await kernel.previewWrite(input.request)); });
+  server.tool("write_apply", "Apply a previously reviewed write request idempotently and record an audit event.", { request: WriteRequestSchema }, async (input, extra) => { assertWritable(extra); return json(await kernel.applyWrite(input.request)); });
   server.tool("vault_validate", "Validate required frontmatter in one vault or all vaults.", { vaultId: z.string().optional() }, async (input) => json(await kernel.validate(input.vaultId)));
   server.tool("audit_recent", "Read recent local mutation audit events.", { limit: z.number().int().min(1).max(100).default(20) }, async (input) => json(await kernel.recentAudit(input.limit)));
   return server;
