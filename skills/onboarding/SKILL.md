@@ -1,12 +1,49 @@
 ---
 name: lifekernel-onboarding
-description: Build a personal Life Kernel vault through a structured first conversation.
+description: Interview a new user and fill a Life Kernel vault with their profile, goals, responsibilities, availability, and chosen planning method.
 ---
 
-# Life Kernel onboarding
+# Onboarding
 
-Use when a user asks to initialize or personalize a new Life Kernel vault.
+Use when the user asks to set up or personalize a new vault, or when `system/Method.md` is blank. Expect 15-30 minutes. Accept voice transcripts and answers in any order. Converse in the user's language; note headings stay as the templates have them.
 
-Ask questions in two or three coherent batches, accepting voice transcripts. Cover: current roles; recurring responsibilities; active projects; fixed commitments; near deadlines; learning; work; health/rest constraints; content/community work; long-term direction; current friction; preferred review rhythm; private topics; tools and existing vaults; and the smallest useful next outcome.
+Setup: call `vault_list`, choose the vault, call `context_bundle`, and read what is already filled so you never re-ask it.
 
-Separate stated facts from your suggestions. Show a compact proposed map before writing. Create only areas and projects that have real content. Leave unknown values blank. Record the onboarding session and link each new project from the Projects MOC. Never infer sensitive profile facts.
+## Interview, in batches
+
+Ask two or three related questions at a time, never a form. Cover, in roughly this order:
+
+1. **Roles and responsibilities.** What they do now (work, study, family, health, community, content) and what has no end date. These become areas.
+2. **Goals.** What they want in the short term (up to ~3 months), medium term (3-12 months), and long term. Ask why each matters and how they would know it is done.
+3. **Projects.** Bounded efforts in progress, each with its outcome and next action.
+4. **Availability.** Fixed commitments, flexible windows, protected rest, known exceptions.
+5. **Capacity.** What a good day and a bad day look like. Record stated capacity as stated; observed capacity comes later from reviews.
+6. **Friction.** What keeps going wrong in planning today.
+7. **Privacy.** Topics to keep off-limits (`ai_access: none`) or restricted.
+8. **Method** (below).
+
+Separate what the user stated from what you suggest. Leave unknown values blank. Never infer sensitive facts about health, money, or relationships.
+
+## Choosing a planning method
+
+Do not impose one. Offer options with their trade-offs and let the user pick or mix:
+
+- **Themed days**: each weekday has a main theme; good for many unrelated areas.
+- **Time blocks**: protected windows per area; good for fixed schedules and deep work.
+- **Daily top three + weekly outcomes**: light and outcome-focused; good for people who dislike schedules.
+- **Minimal**: only the daily circle and a weekly review; good for starting small.
+
+Also ask: usual circle time and length, which questions to always or never ask, weekly review day, what the agent may update without asking (default suggestion: the near-term plan and current state), what it must always confirm (default: profile, accepted decisions, goals), and the tone they want.
+
+## Propose, then write
+
+Show a compact map: areas, goals by horizon, projects, availability summary, and the method. Create only areas and projects that have real content. Ask for confirmation once.
+
+Then write, following the write protocol in the daily-circle skill:
+
+- `system/Method.md` (route `method`), `profile/Profile.md` (route `profile`), `schedule/Availability.md` and `schedule/Capacity.md` (route `plan`), `state/Current State.md` (route `state`): fill sections with `update_section`, copying headings exactly.
+- One note per goal (route `goal`), area (route `area`), and project (route `project`) using the templates' sections; link each from `goals/Goals`, `areas/Areas`, or `projects/Projects` with `append`.
+- A session note (route `session`) recording that onboarding happened and what was decided.
+- Routes with policy `review` need the user's yes from the confirmation step, then `approved: true`.
+
+Finish by telling the user the one thing to do next: start the first daily circle tonight.

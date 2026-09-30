@@ -64,6 +64,34 @@
           "status": "inbox",
           "area": "system",
           "policy": "auto"
+        },
+        "state": {
+          "folder": "state",
+          "type": "state",
+          "status": "active",
+          "area": "life",
+          "policy": "auto"
+        },
+        "profile": {
+          "folder": "profile",
+          "type": "profile",
+          "status": "active",
+          "area": "life",
+          "policy": "review"
+        },
+        "method": {
+          "folder": "system",
+          "type": "method",
+          "status": "active",
+          "area": "system",
+          "policy": "review"
+        },
+        "area": {
+          "folder": "areas",
+          "type": "area",
+          "status": "active",
+          "area": "life",
+          "policy": "review"
         }
       }
     }
