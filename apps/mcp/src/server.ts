@@ -14,7 +14,7 @@ export const INSTRUCTIONS = [
 ].join("\n");
 
 export function createLifeKernelMcp(kernel: LifeKernel, skills: Skill[] = loadSkills()) {
-  const server = new McpServer({ name: "lifekernel", version: "0.1.0-dev" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "lifekernel", version: "0.1.0-alpha.0" }, { instructions: INSTRUCTIONS });
 
   const skillNames = skills.map((skill) => skill.name);
   server.tool(

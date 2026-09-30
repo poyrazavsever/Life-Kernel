@@ -15,7 +15,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   const app = createMcpExpressApp({ host });
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: "0.1.0-dev" }));
+  app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: "0.1.0-alpha.0" }));
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.header("origin");

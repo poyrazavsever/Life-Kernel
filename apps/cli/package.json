@@ -1,6 +1,6 @@
 {
   "name": "@lifekernel/cli",
-  "version": "0.1.0-dev",
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "bin": {
     "lifekernel": "dist/index.js"
@@ -12,6 +12,6 @@
     "test": "vitest run src"
   },
   "dependencies": {
-    "@lifekernel/core": "0.1.0-dev"
+    "@lifekernel/core": "0.1.0-alpha.0"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "life-kernel",
-  "version": "0.1.0-dev",
+  "version": "0.1.0-alpha.0",
   "private": true,
   "type": "module",
   "workspaces": [

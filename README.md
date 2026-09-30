@@ -58,6 +58,8 @@ Start a local MCP server:
 LIFEKERNEL_CONFIG=./lifekernel.config.json npm run dev:stdio
 ```
 
+Connect Claude Desktop, Claude Code, or Codex with `npm run cli -- connect <client>` (see [clients](docs/clients.md)).
+
 Start the authenticated HTTP server:
 
 ```bash
@@ -95,6 +97,7 @@ assets/brand             canonical visual identity assets
 
 - [Architecture](docs/architecture.md)
 - [Vault specification](docs/vault-spec.md)
+- [Connecting clients](docs/clients.md)
 - [Agent integration](docs/agent-integration.md)
 - [Self-hosting](docs/self-hosting.md)
 - [Security model](docs/security-model.md)
