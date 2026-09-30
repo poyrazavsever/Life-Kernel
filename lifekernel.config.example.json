@@ -9,10 +9,54 @@
       "path": "./vaults/personal",
       "mode": "read-write",
       "routes": {
-        "session": { "folder": "sessions", "type": "session", "status": "active", "area": "system" },
-        "daily": { "folder": "daily", "type": "daily", "status": "active", "area": "life" },
-        "project": { "folder": "projects", "type": "project", "status": "active", "area": "projects" },
-        "inbox": { "folder": "inbox", "type": "note", "status": "inbox", "area": "system" }
+        "session": {
+          "folder": "sessions",
+          "type": "session",
+          "status": "active",
+          "area": "system"
+        },
+        "daily": {
+          "folder": "daily",
+          "type": "daily",
+          "status": "active",
+          "area": "life"
+        },
+        "review": {
+          "folder": "reviews",
+          "type": "weekly-review",
+          "status": "active",
+          "area": "life"
+        },
+        "decision": {
+          "folder": "decisions",
+          "type": "decision",
+          "status": "proposed",
+          "area": "system"
+        },
+        "goal": {
+          "folder": "goals",
+          "type": "goal",
+          "status": "active",
+          "area": "life"
+        },
+        "project": {
+          "folder": "projects",
+          "type": "project",
+          "status": "active",
+          "area": "projects"
+        },
+        "plan": {
+          "folder": "schedule",
+          "type": "plan",
+          "status": "active",
+          "area": "life"
+        },
+        "inbox": {
+          "folder": "inbox",
+          "type": "note",
+          "status": "inbox",
+          "area": "system"
+        }
       }
     }
   ]

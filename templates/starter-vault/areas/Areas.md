@@ -9,4 +9,4 @@ ai_access: "context"
 
 # Areas
 
-Add long-running responsibilities here after onboarding.
+An area is a responsibility with no end date, such as health, a job, studies, or family. One note per area, created from [[_templates/Area]]. Create an area only when it has real content.
