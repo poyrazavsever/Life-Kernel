@@ -53,3 +53,26 @@ describe("validation", () => {
     expect(result).toEqual({ ok: true, notes: 1, issues: [] });
   });
 });
+
+describe("AI access policy", () => {
+  it("never exposes none notes and requires an explicit flag for restricted notes", async () => {
+    const { kernel, vault } = await fixture();
+    await writeFile(join(vault, "none.md"), "---\nid: none\ntype: note\nstatus: active\narea: test\nprivacy: private\nai_access: none\n---\n\n# Hidden needle\n", "utf8");
+    await writeFile(join(vault, "restricted.md"), "---\nid: restricted\ntype: note\nstatus: active\narea: test\nprivacy: private\nai_access: restricted\n---\n\n# Restricted needle\n", "utf8");
+
+    await expect(kernel.readNote("test", "none.md", true)).rejects.toThrow(/excluded/);
+    await expect(kernel.readNote("test", "restricted.md")).rejects.toThrow(/explicit restricted/);
+    await expect(kernel.readNote("test", "restricted.md", true)).resolves.toMatchObject({ path: "restricted.md" });
+    await expect(kernel.search("needle", "test", 20)).resolves.toEqual([]);
+    await expect(kernel.search("needle", "test", 20, true)).resolves.toHaveLength(1);
+  });
+});
+
+describe("route policy", () => {
+  it("rejects appends outside the selected route folder", async () => {
+    const { kernel, vault } = await fixture();
+    await writeFile(join(vault, "outside.md"), "---\nid: outside\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: context\n---\n\n# Outside\n", "utf8");
+    const target = await kernel.readNote("test", "outside.md");
+    await expect(kernel.previewWrite({ requestId: "request-0003", vaultId: "test", operation: "append", route: "session", title: "Outside", targetPath: "outside.md", expectedSha256: target.sha256, body: "Should fail", source: "test", sourceDate: "2026-09-30" })).rejects.toThrow(/outside the selected route/);
+  });
+});

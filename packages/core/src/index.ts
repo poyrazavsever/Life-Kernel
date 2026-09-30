@@ -85,6 +85,21 @@ function yamlValue(value: string): string {
   return JSON.stringify(value);
 }
 
+type AiAccess = "context" | "restricted" | "none";
+
+function aiAccessFor(content: string): AiAccess | null {
+  if (!content.startsWith("---")) return null;
+  const frontmatter = content.split(/^---\s*$/m, 3)[1] ?? "";
+  const match = frontmatter.match(/^ai_access:\s*["']?(context|restricted|none)["']?\s*$/m);
+  return (match?.[1] as AiAccess | undefined) ?? null;
+}
+
+function assertReadable(content: string, includeRestricted: boolean): void {
+  const access = aiAccessFor(content);
+  if (access === "none") throw new Error("This note is excluded from AI access.");
+  if (access === "restricted" && !includeRestricted) throw new Error("This note requires explicit restricted access.");
+}
+
 function isInside(root: string, candidate: string): boolean {
   const resolvedRoot = resolve(root);
   const resolvedCandidate = resolve(candidate);
@@ -151,14 +166,15 @@ export class LifeKernel {
     return { ok: checks.every((item) => item.ok), checks, stateDir: this.config.stateDir };
   }
 
-  async readNote(vaultId: string, path: string) {
+  async readNote(vaultId: string, path: string, includeRestricted = false) {
     const vault = this.vault(vaultId);
     const absolute = resolveMarkdownPath(vault.path, path);
     const content = await readFile(absolute, "utf8");
+    assertReadable(content, includeRestricted);
     return { vaultId, path: relative(vault.path, absolute).replaceAll("\\", "/"), content, sha256: sha256(content) };
   }
 
-  async search(query: string, vaultId?: string, limit = 20): Promise<SearchHit[]> {
+  async search(query: string, vaultId?: string, limit = 20, includeRestricted = false): Promise<SearchHit[]> {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) throw new Error("Search query cannot be empty.");
     const vaults = vaultId ? [this.vault(vaultId)] : this.config.vaults;
@@ -166,6 +182,8 @@ export class LifeKernel {
     for (const vault of vaults) {
       for (const file of await markdownFiles(vault.path)) {
         const content = await readFile(file, "utf8");
+        const access = aiAccessFor(content);
+        if (access === "none" || (access === "restricted" && !includeRestricted)) continue;
         const lines = content.split(/\r?\n/);
         lines.forEach((line, index) => {
           if (hits.length >= limit || !line.toLocaleLowerCase().includes(needle)) return;
@@ -203,12 +221,16 @@ export class LifeKernel {
     }
 
     const absolute = resolveMarkdownPath(vault.path, path);
+    const routeRoot = resolve(vault.path, route.folder);
+    if (!isInside(vault.path, routeRoot)) throw new Error("Route folder escapes the configured vault root.");
     let before = "";
     try { before = await readFile(absolute, "utf8"); } catch (error: unknown) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") throw error;
     }
 
+    if (request.operation === "append" && !isInside(routeRoot, absolute)) throw new Error("Append target is outside the selected route folder.");
+    if (request.operation === "append" && aiAccessFor(before) === "none") throw new Error("This note is excluded from AI access.");
     if (request.operation === "create" && before) throw new Error(`Note already exists: ${path}`);
     if (request.operation === "append" && !before) throw new Error(`Append target does not exist: ${path}`);
     if (request.operation === "append" && !request.expectedSha256) throw new Error("expectedSha256 is required for append operations.");
@@ -308,4 +330,3 @@ export class LifeKernel {
     }
   }
 }
-

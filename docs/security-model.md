@@ -6,7 +6,8 @@ Current controls:
 
 - configured vault roots and Markdown-only relative paths;
 - explicit read-only or read-write mode;
-- named write routes;
+- enforced `ai_access` filtering for reads and searches;
+- named write routes whose append targets stay inside the route folder;
 - preview/apply split;
 - request-ID idempotency receipts;
 - expected SHA-256 on appends;

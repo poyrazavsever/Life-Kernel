@@ -47,7 +47,7 @@ The server exposes `/mcp` plus a small REST surface under `/v1`. See [agent inte
 
 - list configured vaults;
 - search Markdown with file, line, and SHA-256 provenance;
-- read one safe relative Markdown path;
+- read one safe relative Markdown path while enforcing `ai_access`;
 - preview a routed create or append;
 - apply the exact request idempotently;
 - validate required frontmatter and inspect recent audit events.

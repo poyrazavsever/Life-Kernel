@@ -29,8 +29,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 app.get("/v1/vaults", (_req, res) => res.json(kernel.listVaults()));
-app.post("/v1/search", async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit)); } catch (e) { next(e); } });
-app.post("/v1/read", async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path)); } catch (e) { next(e); } });
+app.post("/v1/search", async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
+app.post("/v1/read", async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
 app.post("/v1/writes/preview", async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });
 app.post("/v1/writes/apply", async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body)); } catch (e) { next(e); } });
 app.post("/v1/validate", async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });
@@ -57,4 +57,3 @@ app.all("/mcp", async (req: Request, res: Response) => {
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => res.status(400).json({ error: error instanceof Error ? error.message : String(error) }));
 app.listen(port, host, () => process.stderr.write(`Life Kernel listening on http://${host}:${port}\n`));
-
