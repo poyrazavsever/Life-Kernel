@@ -13,49 +13,57 @@
           "folder": "sessions",
           "type": "session",
           "status": "active",
-          "area": "system"
+          "area": "system",
+          "policy": "auto"
         },
         "daily": {
           "folder": "daily",
           "type": "daily",
           "status": "active",
-          "area": "life"
+          "area": "life",
+          "policy": "auto"
         },
         "review": {
           "folder": "reviews",
           "type": "weekly-review",
           "status": "active",
-          "area": "life"
+          "area": "life",
+          "policy": "auto"
         },
         "decision": {
           "folder": "decisions",
           "type": "decision",
           "status": "proposed",
-          "area": "system"
+          "area": "system",
+          "policy": "review"
         },
         "goal": {
           "folder": "goals",
           "type": "goal",
           "status": "active",
-          "area": "life"
+          "area": "life",
+          "policy": "review"
         },
         "project": {
           "folder": "projects",
           "type": "project",
           "status": "active",
-          "area": "projects"
+          "area": "projects",
+          "policy": "review"
         },
         "plan": {
           "folder": "schedule",
           "type": "plan",
           "status": "active",
-          "area": "life"
+          "area": "life",
+          "policy": "auto"
         },
         "inbox": {
           "folder": "inbox",
           "type": "note",
           "status": "inbox",
-          "area": "system"
+          "area": "system",
+          "policy": "auto"
         }
       }
     }

@@ -12,7 +12,7 @@ async function fixture() {
     version: 1,
     stateDir: join(root, "state"),
     timezone: "UTC",
-    vaults: [{ id: "test", kind: "project", path: vault, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "project" } } }]
+    vaults: [{ id: "test", kind: "project", path: vault, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "project", policy: "auto" }, reviewed: { folder: "reviewed", type: "decision", status: "proposed", area: "project", policy: "review" }, blocked: { folder: "blocked", type: "note", status: "active", area: "project", policy: "deny" } } }]
   };
   return { root, vault, kernel: new LifeKernel(config) };
 }
@@ -92,5 +92,34 @@ describe("time zone", () => {
     const at = new Date("2026-09-30T22:30:00Z");
     expect(localDate("UTC", at)).toBe("2026-09-30");
     expect(localDate("Europe/Istanbul", at)).toBe("2026-10-01");
+  });
+});
+
+describe("route policy levels", () => {
+  const base = { vaultId: "test", operation: "create", title: "Choose a stack", body: "Decided on TypeScript.", source: "test", sourceDate: "2026-09-30" };
+
+  it("requires explicit approval to apply a review route", async () => {
+    const { kernel, vault } = await fixture();
+    const request = { ...base, requestId: "request-0101", route: "reviewed" };
+    await expect(kernel.previewWrite(request)).resolves.toMatchObject({ policy: "review" });
+    await expect(kernel.applyWrite(request)).rejects.toThrow(/requires user approval/);
+    await expect(readFile(join(vault, "reviewed/2026-09-30-choose-a-stack.md"), "utf8")).rejects.toThrow();
+    await expect(kernel.applyWrite({ ...request, approved: true })).resolves.toMatchObject({ replayed: false });
+  });
+
+  it("refuses denied routes for preview and apply", async () => {
+    const { kernel } = await fixture();
+    const request = { ...base, requestId: "request-0102", route: "blocked" };
+    await expect(kernel.previewWrite(request)).rejects.toThrow(/denied/);
+    await expect(kernel.applyWrite({ ...request, approved: true })).rejects.toThrow(/denied/);
+  });
+
+  it("applies auto routes without approval and defaults unspecified policy to review", async () => {
+    const { kernel } = await fixture();
+    await expect(kernel.applyWrite({ ...base, requestId: "request-0103", route: "session" })).resolves.toMatchObject({ policy: "auto" });
+    const { loadConfig } = await import("./index.js");
+    const { root } = await fixture();
+    await writeFile(join(root, "c.json"), JSON.stringify({ version: 1, vaults: [{ id: "v", kind: "personal", path: "./v", mode: "read-write", routes: { r: { folder: "r", type: "note", status: "active", area: "x" } } }] }));
+    expect((await loadConfig(join(root, "c.json"))).vaults[0]!.routes.r!.policy).toBe("review");
   });
 });

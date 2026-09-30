@@ -8,8 +8,11 @@ const RouteSchema = z.object({
   type: z.string().min(1),
   status: z.string().min(1),
   area: z.string().min(1),
-  moc: z.string().optional()
+  moc: z.string().optional(),
+  policy: z.enum(["auto", "review", "deny"]).default("review")
 });
+
+export type RoutePolicy = z.infer<typeof RouteSchema>["policy"];
 
 const VaultSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-_]*$/),
@@ -40,7 +43,8 @@ export const WriteRequestSchema = z.object({
   targetPath: z.string().optional(),
   expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   source: z.string().min(1),
-  sourceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+  sourceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  approved: z.boolean().optional()
 });
 
 export type LifeKernelConfig = z.infer<typeof ConfigSchema>;
@@ -61,6 +65,7 @@ export interface PreviewResult {
   vaultId: string;
   path: string;
   operation: "create" | "append";
+  policy: RoutePolicy;
   beforeSha256: string | null;
   afterSha256: string;
   changedBytes: number;
@@ -162,7 +167,10 @@ export class LifeKernel {
   }
 
   listVaults() {
-    return this.config.vaults.map(({ id, kind, mode, routes }) => ({ id, kind, mode, routes: Object.keys(routes) }));
+    return this.config.vaults.map(({ id, kind, mode, routes }) => ({
+      id, kind, mode,
+      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy }))
+    }));
   }
 
   async doctor() {
@@ -219,6 +227,7 @@ export class LifeKernel {
     if (vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
     const route = vault.routes[request.route];
     if (!route) throw new Error(`Route ${request.route} is not allowed for vault ${vault.id}.`);
+    if (route.policy === "deny") throw new Error(`Route ${request.route} is denied by policy.`);
 
     let path: string;
     if (request.operation === "create") {
@@ -273,6 +282,7 @@ export class LifeKernel {
       vaultId: vault.id,
       path: canonicalPath,
       operation: request.operation,
+      policy: route.policy,
       beforeSha256: before ? sha256(before) : null,
       afterSha256: sha256(after),
       changedBytes: Buffer.byteLength(after) - Buffer.byteLength(before),
@@ -299,6 +309,9 @@ export class LifeKernel {
     }
 
     const proposed = await this.proposed(request);
+    if (proposed.preview.policy === "review" && request.approved !== true) {
+      throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
+    }
     await mkdir(dirname(proposed.absolute), { recursive: true });
     await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" }).catch(async (error: unknown) => {
       if (request.operation === "create" || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

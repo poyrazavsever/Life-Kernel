@@ -21,7 +21,7 @@ async function fixture() {
     version: 1,
     stateDir: join(root, "state"),
     timezone: "UTC",
-    vaults: [{ id: "test", kind: "personal", path: vault, mode: "read-write", routes: { daily: { folder: "daily", type: "daily", status: "active", area: "life" } } }]
+    vaults: [{ id: "test", kind: "personal", path: vault, mode: "read-write", routes: { daily: { folder: "daily", type: "daily", status: "active", area: "life", policy: "auto" } } }]
   };
   return new LifeKernel(config);
 }
@@ -61,7 +61,7 @@ describe("HTTP surface", () => {
       expect((await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${token}`, origin: "https://evil.example" } })).status).toBe(403);
       const ok = await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${token}` } });
       expect(ok.status).toBe(200);
-      expect(await ok.json()).toEqual([{ id: "test", kind: "personal", mode: "read-write", routes: ["daily"] }]);
+      expect(await ok.json()).toEqual([{ id: "test", kind: "personal", mode: "read-write", routes: [{ name: "daily", folder: "daily", type: "daily", policy: "auto" }] }]);
     } finally { await close(); }
   });
 
