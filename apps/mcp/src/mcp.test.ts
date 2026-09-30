@@ -35,7 +35,7 @@ describe("MCP tools", () => {
     await client.connect(clientSide);
 
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["audit_recent", "context_bundle", "daily_get", "note_backlinks", "note_read", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
+    expect(names).toEqual(["audit_recent", "context_bundle", "daily_get", "note_backlinks", "note_read", "skill_get", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
 
     const search = await client.callTool({ name: "vault_search", arguments: { query: "needle" } });
     const text = (search.content as Array<{ text: string }>)[0]!.text;
@@ -67,5 +67,54 @@ describe("HTTP surface", () => {
 
   it("refuses short tokens", async () => {
     expect(() => createHttpApp(undefined as never, { token: "short" })).toThrow(/24 characters/);
+  });
+});
+
+describe("skills over MCP", () => {
+  async function connect() {
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createLifeKernelMcp(await fixture()).connect(serverSide);
+    const client = new Client({ name: "test", version: "0.0.0" });
+    await client.connect(clientSide);
+    return client;
+  }
+
+  it("ships instructions that point the agent at skill_get", async () => {
+    const client = await connect();
+    expect(client.getInstructions()).toMatch(/skill_get/);
+  });
+
+  it("serves the canonical skill text by tool and by prompt", async () => {
+    const client = await connect();
+    const tool = await client.callTool({ name: "skill_get", arguments: { name: "daily-circle" } });
+    const text = (tool.content as Array<{ text: string }>)[0]!.text;
+    expect(text).toMatch(/# Daily circle/);
+    expect(text).not.toMatch(/^---/);
+
+    const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
+    expect(prompts).toEqual(["daily_circle", "onboarding", "project_memory", "second_brain", "weekly_review"]);
+    const prompt = await client.getPrompt({ name: "daily_circle", arguments: { vaultId: "test" } });
+    const body = (prompt.messages[0]!.content as { text: string }).text;
+    expect(body).toContain(text);
+    expect(body).toContain("Use vault: test");
+  });
+
+  it("reports unknown skills as tool errors", async () => {
+    const client = await connect();
+    const result = await client.callTool({ name: "skill_get", arguments: { name: "nope" } });
+    expect(result.isError).toBe(true);
+  });
+
+  it("only references tools and routes that exist", async () => {
+    const client = await connect();
+    const tools = new Set((await client.listTools()).tools.map((t) => t.name));
+    const { readFile } = await import("node:fs/promises");
+    const config = JSON.parse(await readFile(new URL("../../../lifekernel.config.example.json", import.meta.url), "utf8")) as { vaults: Array<{ routes: Record<string, unknown> }> };
+    const routes = new Set(Object.keys(config.vaults[0]!.routes));
+    for (const name of ["onboarding", "daily-circle", "weekly-review", "second-brain", "project-memory"]) {
+      const text = ((await client.callTool({ name: "skill_get", arguments: { name } })).content as Array<{ text: string }>)[0]!.text;
+      for (const [, tool] of text.matchAll(/`((?:vault|note|write|daily|context|audit|skill)_[a-z_]+)`/g)) expect(tools.has(tool!), `${name} mentions unknown tool ${tool}`).toBe(true);
+      for (const [, route] of text.matchAll(/routes? `([a-z]+)`/g)) expect(routes.has(route!), `${name} mentions unknown route ${route}`).toBe(true);
+    }
   });
 });
