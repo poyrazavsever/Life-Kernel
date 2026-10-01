@@ -32,7 +32,13 @@ export async function commitPaths(vaultPath: string, paths: string[], subject: s
 
 /** The commit that recorded a request, and the note's content just before it. */
 export async function contentBefore(vaultPath: string, path: string, requestId: string): Promise<{ commit: string; content: string }> {
-  const log = (await git(vaultPath, ["log", "--format=%H", "--fixed-strings", `--grep=request: ${requestId}`, "--", path])).trim().split("\n").filter(Boolean);
+  // --grep matches substrings, so "request: abc-1" would also find a commit for "abc-12". Keep only commits
+  // that carry exactly this ID on their own trailer line.
+  const entries = (await git(vaultPath, ["log", "--format=%H%x1f%B%x1e", "--fixed-strings", `--grep=request: ${requestId}`, "--", path])).split("\x1e");
+  const log = entries
+    .map((entry) => entry.trim().split("\x1f"))
+    .filter(([hash, body]) => hash && (body ?? "").split(/\r?\n/).some((line) => line.trim() === `request: ${requestId}`))
+    .map(([hash]) => hash!);
   if (log.length === 0) throw new Error(`No commit records ${requestId}; history may have been off when it was written.`);
   const prefix = (await git(vaultPath, ["rev-parse", "--show-prefix"])).trim();
   const commit = log[log.length - 1]!;

@@ -76,3 +76,17 @@ describe("git history", () => {
     expect((await kernel.readNote("work", "projects/launch.md")).content).toContain("Written anyway.");
   });
 });
+
+describe("undo with request IDs that share a prefix", () => {
+  it("finds the commit for exactly the requested ID, not one whose ID starts with it", async () => {
+    const { vault, kernel } = await setup();
+    const original = await readFile(join(vault, "projects/launch.md"), "utf8");
+    await update(kernel, "history-12", "Written under the longer ID first.");
+    const afterLonger = await readFile(join(vault, "projects/launch.md"), "utf8");
+    await update(kernel, "history-1", "Written under the shorter ID second.");
+    // "request: history-1" is a substring of "request: history-12"; undo must still pick the second commit.
+    await expect(kernel.undo("history-1", { apply: true })).resolves.toMatchObject({ applied: true });
+    expect(await readFile(join(vault, "projects/launch.md"), "utf8")).toBe(afterLonger);
+    expect(afterLonger).not.toBe(original);
+  });
+});
