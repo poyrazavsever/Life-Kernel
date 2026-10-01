@@ -1,0 +1,106 @@
+{
+  "session": {
+    "folder": "sessions",
+    "type": "session",
+    "status": "active",
+    "area": "projects",
+    "policy": "auto",
+    "fields": [
+      "status"
+    ]
+  },
+  "review": {
+    "folder": "reviews",
+    "type": "weekly-review",
+    "status": "active",
+    "area": "role",
+    "policy": "auto",
+    "period": "week",
+    "fields": [
+      "status"
+    ]
+  },
+  "decision": {
+    "folder": "decisions",
+    "type": "decision",
+    "status": "proposed",
+    "area": "role",
+    "policy": "review",
+    "fields": [
+      "status",
+      "decided_on",
+      "supersedes"
+    ]
+  },
+  "project": {
+    "folder": "projects",
+    "type": "project",
+    "status": "active",
+    "area": "projects",
+    "policy": "review",
+    "fields": [
+      "status",
+      "due",
+      "next_action"
+    ]
+  },
+  "one-on-one": {
+    "folder": "one-on-ones",
+    "type": "one-on-one",
+    "status": "active",
+    "area": "role",
+    "policy": "auto"
+  },
+  "stakeholders": {
+    "folder": "stakeholders",
+    "type": "moc",
+    "status": "active",
+    "area": "role",
+    "policy": "review"
+  },
+  "role": {
+    "folder": "role",
+    "type": "role",
+    "status": "active",
+    "area": "role",
+    "policy": "review"
+  },
+  "state": {
+    "folder": "state",
+    "type": "state",
+    "status": "active",
+    "area": "system",
+    "policy": "auto"
+  },
+  "inbox": {
+    "folder": "inbox",
+    "type": "note",
+    "status": "inbox",
+    "area": "system",
+    "policy": "auto",
+    "period": "day",
+    "fields": [
+      "status"
+    ]
+  },
+  "method": {
+    "folder": "system",
+    "type": "method",
+    "status": "active",
+    "area": "system",
+    "policy": "review",
+    "fields": [
+      "morning_plan_time",
+      "morning_plan_days",
+      "daily_circle_time",
+      "daily_circle_days",
+      "weekly_review_day",
+      "weekly_review_time",
+      "monthly_review_day",
+      "monthly_review_time",
+      "quarterly_review_day",
+      "quarterly_review_time",
+      "quiet_hours"
+    ]
+  }
+}

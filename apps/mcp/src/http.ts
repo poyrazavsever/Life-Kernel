@@ -1,11 +1,13 @@
-import { LifeKernel, loadConfig } from "@lifekernel/core";
+import { LifeKernel, loadConfig, loadEnvBeside, pollTelegram, tick } from "@lifekernel/core";
 import { createHttpApp } from "./app.js";
 import { validatePublicUrl } from "./oauth.js";
 
+const configPath = process.env.LIFEKERNEL_CONFIG ?? "./lifekernel.config.json";
+await loadEnvBeside(configPath);
 const host = process.env.LIFEKERNEL_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEKERNEL_PORT ?? "8787");
 const origins = new Set((process.env.LIFEKERNEL_ALLOWED_ORIGINS ?? "").split(",").map((v) => v.trim()).filter(Boolean));
-const kernel = new LifeKernel(await loadConfig(process.env.LIFEKERNEL_CONFIG ?? "./lifekernel.config.json"));
+const kernel = new LifeKernel(await loadConfig(configPath));
 
 const publicUrl = process.env.LIFEKERNEL_PUBLIC_URL;
 const ownerSecret = process.env.LIFEKERNEL_OWNER_SECRET;
@@ -15,6 +17,32 @@ const app = createHttpApp(kernel, {
   token: process.env.LIFEKERNEL_API_TOKEN || undefined,
   origins,
   host,
-  oauth: publicUrl && ownerSecret ? { publicUrl: validatePublicUrl(publicUrl), ownerSecret, stateDir: kernel.config.stateDir } : undefined
+  oauth: publicUrl && ownerSecret ? { publicUrl: validatePublicUrl(publicUrl), ownerSecret, stateDir: kernel.config.stateDir } : undefined,
+  calendarToken: process.env.LIFEKERNEL_CALENDAR_TOKEN || undefined,
+  captureToken: process.env.LIFEKERNEL_CAPTURE_TOKEN || undefined
 });
+
+// In remote and Docker mode the server checks rituals itself; locally, `lifekernel schedule install` does.
+if (process.env.LIFEKERNEL_SCHEDULER === "on") {
+  const minutes = Number(process.env.LIFEKERNEL_TICK_MINUTES ?? "5");
+  if (!(minutes >= 1 && minutes <= 60)) throw new Error("LIFEKERNEL_TICK_MINUTES must be between 1 and 60.");
+  const check = () => tick(kernel).then((result) => {
+    for (const nudge of result.sent) for (const channel of nudge.channels) if (!channel.ok) process.stderr.write(`Reminder ${nudge.ritual} on ${channel.type} failed: ${channel.error}\n`);
+  }, (error: unknown) => process.stderr.write(`Reminder check failed: ${error instanceof Error ? error.message : String(error)}\n`));
+  void check();
+  setInterval(check, minutes * 60_000).unref();
+
+  // Telegram replies arrive by long polling, so button presses and captures are handled within seconds.
+  if (kernel.config.notifications?.channels.some((channel) => channel.type === "telegram")) {
+    const listen = async (): Promise<void> => {
+      for (;;) {
+        try { await pollTelegram(kernel, { timeoutSeconds: 25 }); } catch (error: unknown) {
+          process.stderr.write(`Telegram poll failed: ${error instanceof Error ? error.message : String(error)}\n`);
+          await new Promise((resolve) => setTimeout(resolve, 30_000));
+        }
+      }
+    };
+    void listen();
+  }
+}
 app.listen(port, host, () => process.stderr.write(`Life Kernel listening on http://${host}:${port}${publicUrl ? ` (OAuth issuer ${publicUrl})` : ""}\n`));

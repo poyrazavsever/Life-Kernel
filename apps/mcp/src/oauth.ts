@@ -15,6 +15,8 @@ export interface OAuthOptions {
   /** Secret the owner types on the consent page. Never leaves this process. */
   ownerSecret: string;
   stateDir: string;
+  /** Vault IDs offered on the consent page; when the owner limits any, tokens carry vault grants. */
+  vaults?: string[];
   accessTtlSeconds?: number;
   refreshTtlSeconds?: number;
   maxClients?: number;
@@ -174,6 +176,16 @@ export class LifeKernelOAuth implements OAuthServerProvider {
     const base = requested.length ? requested : [...ALL_SCOPES];
     const scopes = body.write === "1" ? base : base.filter((scope) => scope !== SCOPE_WRITE);
     if (!scopes.includes(SCOPE_READ)) scopes.unshift(SCOPE_READ);
+    // Per-vault choices: "full" follows the write checkbox, "read" is read-only, "none" hides the vault.
+    // When every vault is "full" the token carries no vault grants and keeps seeing vaults added later.
+    const vaults = this.options.vaults ?? [];
+    const levels = vaults.map((id) => ({ id, level: ["read", "none"].includes(body[`vault_${id}`] ?? "") ? body[`vault_${id}`]! : "full" }));
+    if (levels.some((vault) => vault.level !== "full")) {
+      const granted = levels.filter((vault) => vault.level !== "none");
+      if (granted.length === 0) { this.page(res, 400, this.consentHtml(body.request, client, record.params, "Allow at least one vault.")); return; }
+      scopes.push(...granted.map((vault) => `vault:${vault.id}:read`));
+      if (scopes.includes(SCOPE_WRITE)) scopes.push(...granted.filter((vault) => vault.level === "full").map((vault) => `vault:${vault.id}:write`));
+    }
     const code = token("lkc_");
     this.codes.set(code, {
       clientId: client.client_id,
@@ -284,6 +296,9 @@ export class LifeKernelOAuth implements OAuthServerProvider {
       `<form method="post" action="/oauth/consent" autocomplete="off">` +
       `<input type="hidden" name="request" value="${escapeHtml(id)}">` +
       `<label><input type="checkbox" name="write" value="1" checked> Allow writing notes through routes</label>` +
+      ((this.options.vaults ?? []).length > 1
+        ? `<fieldset style="margin-top:1rem"><legend>Vaults</legend>` + (this.options.vaults ?? []).map((id) => `<label style="display:block">${escapeHtml(id)} <select name="vault_${escapeHtml(id)}"><option value="full">full access</option><option value="read">read only</option><option value="none">no access</option></select></label>`).join("") + `</fieldset>`
+        : "") +
       `<label style="display:block;margin-top:1rem">Owner secret<input type="password" name="secret" required autocomplete="off"></label>` +
       `<button type="submit" name="decision" value="approve">Approve</button><button type="submit" name="decision" value="deny" formnovalidate>Deny</button></form>`
     );

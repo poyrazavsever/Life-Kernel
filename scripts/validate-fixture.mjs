@@ -38,7 +38,20 @@ async function brokenLinks(vault) {
 }
 
 try {
-  run("init", "vaults/personal");
+  const init = run("init", "vaults/personal");
+  if (!init.config.created) throw new Error(`init should create a config: ${JSON.stringify(init)}`);
+  const generated = run("doctor");
+  if (!generated.ok || !generated.checks[0].path.replaceAll("\\", "/").endsWith("vaults/personal")) throw new Error(`the generated config does not point at the vault: ${JSON.stringify(generated)}`);
+  if (run("init", "vaults/personal").config.created) throw new Error("init must not overwrite an existing config");
+  for (const template of ["startup", "work"]) {
+    const added = run("init", `vaults/${template}`, "--template", template);
+    if (added.config.added !== template) throw new Error(`init --template ${template} should add the vault: ${JSON.stringify(added)}`);
+    const broken = await brokenLinks(join(work, "vaults", template));
+    if (broken.length) throw new Error(`broken wikilinks in the ${template} template: ${broken.join("; ")}`);
+  }
+  const all = run("validate");
+  if (!all.ok) throw new Error(`templates fail validation: ${JSON.stringify(all.issues)}`);
+  if (run("vaults").map((vault) => vault.id).join(",") !== "personal,startup,work") throw new Error("init should register every template vault");
   await writeFile(join(work, "lifekernel.config.json"), JSON.stringify({
     version: 1, stateDir: "./state", timezone: "UTC",
     vaults: [{ id: "personal", kind: "personal", path: "./vaults/personal", mode: "read-write", routes: {} }]
@@ -47,6 +60,24 @@ try {
   const validation = run("validate");
   if (!doctor.ok) throw new Error(`doctor failed: ${JSON.stringify(doctor)}`);
   if (!validation.ok || validation.notes === 0) throw new Error(`validate failed: ${JSON.stringify(validation)}`);
+  const migration = run("migrate", "personal");
+  if (migration.from !== migration.to || migration.changes.length) throw new Error(`a fresh vault should need no migration: ${JSON.stringify(migration)}`);
+  const quiet = run("tick", "--dry-run");
+  if (quiet.enabled !== false) throw new Error(`tick should be off without a notifications section: ${JSON.stringify(quiet)}`);
+  const plan = run("schedule", "install", "--dry-run", "--config", join(work, "lifekernel.config.json"));
+  if (!plan.dryRun || plan.files.length === 0 || !plan.files.some((file) => file.content.includes(" tick") || file.content.includes("\"tick\""))) throw new Error(`schedule dry run looks wrong: ${JSON.stringify(plan)}`);
+  const calendar = execFileSync(process.execPath, [cli, "ics", "personal"], { cwd: work, encoding: "utf8", env: { ...process.env, INIT_CWD: work, LIFEKERNEL_CONFIG: join(work, "lifekernel.config.json") } });
+  if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
+  const today = run("today", "--json");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today.date) || today.focus !== null) throw new Error(`today looks wrong for a fresh vault: ${JSON.stringify(today)}`);
+  try {
+    run("brief", "morning-plan");
+    throw new Error("brief must refuse while briefs are off");
+  } catch (error) {
+    if (!String(error.stderr ?? error.message).includes("Briefs are off")) throw error;
+  }
+  const insights = run("insights", "week", "--json");
+  if (insights.period.kind !== "week" || insights.days.recorded !== 0 || insights.observations.length !== 0) throw new Error(`a fresh vault should have empty insights: ${JSON.stringify(insights)}`);
   const broken = await brokenLinks(join(work, "vaults/personal"));
   if (broken.length) throw new Error(`broken wikilinks: ${broken.join("; ")}`);
   process.stdout.write(`fixture ok: ${validation.notes} notes validated\n`);

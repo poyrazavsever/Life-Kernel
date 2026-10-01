@@ -1,0 +1,129 @@
+{
+  "session": {
+    "folder": "sessions",
+    "type": "session",
+    "status": "active",
+    "area": "product",
+    "policy": "auto",
+    "fields": [
+      "status"
+    ]
+  },
+  "review": {
+    "folder": "reviews",
+    "type": "weekly-review",
+    "status": "active",
+    "area": "company",
+    "policy": "auto",
+    "period": "week",
+    "fields": [
+      "status"
+    ]
+  },
+  "decision": {
+    "folder": "decisions",
+    "type": "decision",
+    "status": "proposed",
+    "area": "company",
+    "policy": "review",
+    "fields": [
+      "status",
+      "decided_on",
+      "supersedes"
+    ]
+  },
+  "objective": {
+    "folder": "okrs",
+    "type": "objective",
+    "status": "active",
+    "area": "company",
+    "policy": "review",
+    "fields": [
+      "status",
+      "quarter",
+      "confidence"
+    ]
+  },
+  "project": {
+    "folder": "projects",
+    "type": "project",
+    "status": "active",
+    "area": "product",
+    "policy": "review",
+    "fields": [
+      "status",
+      "owner",
+      "due",
+      "next_action"
+    ]
+  },
+  "meeting": {
+    "folder": "meetings",
+    "type": "meeting",
+    "status": "active",
+    "area": "company",
+    "policy": "auto"
+  },
+  "insight": {
+    "folder": "customers",
+    "type": "insight",
+    "status": "active",
+    "area": "customers",
+    "policy": "auto",
+    "fields": [
+      "segment"
+    ]
+  },
+  "metrics": {
+    "folder": "metrics",
+    "type": "metrics",
+    "status": "active",
+    "area": "company",
+    "policy": "auto"
+  },
+  "product": {
+    "folder": "product",
+    "type": "product",
+    "status": "active",
+    "area": "product",
+    "policy": "review"
+  },
+  "state": {
+    "folder": "state",
+    "type": "state",
+    "status": "active",
+    "area": "system",
+    "policy": "auto"
+  },
+  "inbox": {
+    "folder": "inbox",
+    "type": "note",
+    "status": "inbox",
+    "area": "system",
+    "policy": "auto",
+    "period": "day",
+    "fields": [
+      "status"
+    ]
+  },
+  "method": {
+    "folder": "system",
+    "type": "method",
+    "status": "active",
+    "area": "system",
+    "policy": "review",
+    "fields": [
+      "morning_plan_time",
+      "morning_plan_days",
+      "daily_circle_time",
+      "daily_circle_days",
+      "weekly_review_day",
+      "weekly_review_time",
+      "monthly_review_day",
+      "monthly_review_time",
+      "quarterly_review_day",
+      "quarterly_review_time",
+      "quiet_hours"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+# Vault notes and sources use LF everywhere so hashes, frontmatter parsing, and fixtures match across systems.
+* text=auto eol=lf
+*.webp binary
+*.png binary

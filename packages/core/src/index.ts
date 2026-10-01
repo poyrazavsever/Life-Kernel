@@ -1,7 +1,40 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parseEnv } from "node:util";
 import { z } from "zod";
+import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
+import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
+import { type VaultGrants } from "./access.js";
+import { buildAgenda } from "./agenda.js";
+import { periodInsights, type Insights } from "./insights.js";
+import { replaceFile, withFileLock } from "./files.js";
+import { commitPaths, contentBefore, type HistoryResult } from "./history.js";
+import { ritualCalendar } from "./ics.js";
+import { NotificationsSchema } from "./nudges.js";
+import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
+import { replaceSection } from "./sections.js";
+import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
+import { isoInZone } from "./time.js";
+
+export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
+export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
+export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
+export { readSection, replaceSection } from "./sections.js";
+export type { Insights, RitualConsistency } from "./insights.js";
+export { BriefsSchema, briefAgenda, defaultCreateMessage, prepareBrief, type BriefsConfig, type BriefResult, type CreateMessage } from "./briefs.js";
+export { createAgentToken, findAgentToken, grantScopes, grantsFromScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, type AgentToken, type VaultGrants } from "./access.js";
+export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
+export { actionLink, actionSecret, verifyAction, NUDGE_ACTIONS, type NudgeAction } from "./actions.js";
+export { pollTelegram, telegramChats } from "./telegram.js";
+export { formatRituals, formatToday, todaySummary, type TodaySummary } from "./today.js";
+export { RITUAL_FIELDS, RITUAL_IDS, type QuietHours, type RitualId, type RitualState, type RitualStatus } from "./rituals.js";
+export { ChannelSchema, createChannel, desktopCommand, type Channel, type ChannelConfig, type ChannelDeps, type NudgeMessage } from "./channels.js";
+export { applyNudgeAction, performLinkedAction, decideNudges, loadNudgeState, notificationsVault, NotificationsSchema, nudgeMessage, pauseNudges, sendTestNotification, skipRitual, snoozeRitual, tick, type NotificationsConfig, type NudgeState, type TickResult } from "./nudges.js";
+
+/** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
+export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
+const FIELD_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
 const RouteSchema = z.object({
   folder: z.string().min(1),
@@ -9,18 +42,34 @@ const RouteSchema = z.object({
   status: z.string().min(1),
   area: z.string().min(1),
   moc: z.string().optional(),
-  policy: z.enum(["auto", "review", "deny"]).default("review")
+  policy: z.enum(["auto", "review", "deny"]).default("review"),
+  /** One note per period, named by its period key. Routes of type `daily` default to `day`. */
+  period: z.enum(PERIODS).optional(),
+  /**
+   * A rollup route takes short, linked outcomes from other vaults: `create` and `set_frontmatter` only, a body
+   * of at most 600 characters, and a link to the detailed record (a wikilink, a URL, or `vault:path.md`).
+   */
+  rollup: z.boolean().optional(),
+  /** Frontmatter keys that `create` and `set_frontmatter` may set on this route (default none). */
+  fields: z.array(z.string().regex(FIELD_NAME).refine((key) => !(PROTECTED_FIELDS as readonly string[]).includes(key), (key) => ({ message: `${key} is a protected field and cannot be writable.` }))).optional()
 });
 
 export type RoutePolicy = z.infer<typeof RouteSchema>["policy"];
+export type RouteConfig = z.infer<typeof RouteSchema>;
 
 const VaultSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-_]*$/),
-  kind: z.enum(["personal", "project", "research"]),
+  kind: z.enum(["personal", "project", "research", "startup", "work"]),
   path: z.string().min(1),
   mode: z.enum(["read-only", "read-write"]),
   routes: z.record(RouteSchema).default({}),
-  bundle: z.array(z.string().min(1)).optional()
+  bundle: z.array(z.string().min(1)).optional(),
+  /** The note whose frontmatter holds the planning method and ritual schedule (default `system/Method.md`). */
+  methodNote: z.string().min(1).optional(),
+  /** `git`: commit every applied write in the vault's repository, which makes `undo` possible. */
+  history: z.enum(["git"]).optional(),
+  /** Folders that search, listing, and task queries skip (default `_templates`). Validation still checks them. */
+  ignore: z.array(z.string().min(1)).optional()
 });
 
 function isValidTimeZone(value: string): boolean {
@@ -31,16 +80,28 @@ const ConfigSchema = z.object({
   version: z.literal(1),
   stateDir: z.string().default("./.lifekernel-data"),
   timezone: z.string().refine(isValidTimeZone, "Unknown IANA time zone.").default(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
-  vaults: z.array(VaultSchema).min(1)
+  vaults: z.array(VaultSchema).min(1),
+  /** Ritual reminders; absent means none are sent. */
+  notifications: NotificationsSchema.optional()
 });
+
+function FieldValueSchema() {
+  const text = z.string().max(500).refine((value) => !/[\r\n]/.test(value), "Frontmatter values must be a single line.");
+  const scalar = z.union([text, z.number().finite()]);
+  return z.union([scalar, z.boolean(), z.null(), z.array(scalar).max(50)]);
+}
 
 export const WriteRequestSchema = z.object({
   requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/, "requestId must be 8-128 characters: letters, digits, dot, underscore, or hyphen."),
   vaultId: z.string().min(1),
-  operation: z.enum(["create", "append", "update_section"]),
+  operation: z.enum(["create", "append", "update_section", "set_frontmatter"]),
   route: z.string().min(1),
-  title: z.string().min(1).max(180),
-  body: z.string().min(1),
+  /** Required for create; ignored by the other operations. */
+  title: z.string().min(1).max(180).optional(),
+  /** Required for create, append, and update_section; not accepted for set_frontmatter. */
+  body: z.string().min(1).optional(),
+  /** Frontmatter to set on create or set_frontmatter; null removes a key. Keys must be in the route's `fields`. */
+  fields: z.record(z.string().regex(FIELD_NAME), FieldValueSchema()).optional(),
   targetPath: z.string().optional(),
   section: z.string().trim().min(1).max(180).optional(),
   expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -73,7 +134,25 @@ export interface PreviewResult {
   changedBytes: number;
   preview: string;
 }
-export type ApplyResult = PreviewResult & { appliedAt: string; replayed: boolean };
+export type ApplyResult = PreviewResult & { appliedAt: string; replayed: boolean; history?: HistoryResult };
+
+/** Who asked for a write. `id` comes from authentication; `name` is what the client calls itself. */
+export interface WriteContext { client?: { id?: string; name?: string } }
+
+export interface KernelOptions {
+  /** Clock used for dates and timestamps; tests pass a fixed one. */
+  now?: () => Date;
+}
+
+interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: PreviewResult & { appliedAt?: string } }
+
+const ROLLUP_MAX_CHARS = 600;
+const ROLLUP_LINK = /\[\[[^\]]+\]\]|https?:\/\/\S+|\b[a-z0-9][a-z0-9-_]*:[^\s]+\.md\b/;
+
+/** Starter vault layout this release writes and migrates to. */
+export const LAYOUT_VERSION = 3;
+const DAILY_TEMPLATE_FIELDS: Record<string, FieldValue> = { energy: "", focus_hours: "", morning_plan: "", circle: "", circle_at: "" };
+
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -108,14 +187,32 @@ export interface ContextBundle {
   notes: BundleNote[];
   skipped: Array<{ path: string; reason: "missing" | "excluded" | "restricted" | "budget" }>;
   totalChars: number;
+  /** Ritual state right now; present when the bundle is for today. */
+  rituals?: RitualReport;
+}
+
+export interface RitualReport {
+  vaultId: string;
+  /** The current time in the configured zone. */
+  now: string;
+  date: string;
+  timeZone: string;
+  quietHours: QuietHours | null;
+  rituals: RitualStatus[];
+  /** Set when the method note cannot be read, so no ritual is scheduled. */
+  error?: string;
 }
 
 export interface Backlink { path: string; line: number; excerpt: string; sha256: string }
 
-function slugify(value: string): string {
-  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-  const slug = normalized.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug || `note-${Date.now()}`;
+// Letters that NFKD does not decompose into an ASCII base letter.
+const TRANSLITERATIONS: Record<string, string> = { "\u0131": "i", "\u00df": "ss", "\u00e6": "ae", "\u00f8": "o", "\u0153": "oe", "\u0111": "d", "\u0142": "l", "\u00fe": "th" };
+
+function slugify(value: string, fallback: string): string {
+  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const ascii = normalized.replace(/[\u0131\u00df\u00e6\u00f8\u0153\u0111\u0142\u00fe]/g, (letter) => TRANSLITERATIONS[letter]!);
+  const slug = ascii.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || fallback;
 }
 
 function yamlValue(value: string): string {
@@ -123,12 +220,43 @@ function yamlValue(value: string): string {
 }
 
 type AiAccess = "context" | "restricted" | "none";
+const AI_ACCESS = ["context", "restricted", "none"];
 
+/** A note's ai_access. An unrecognized value counts as restricted, so a typo never widens access. */
 function aiAccessFor(content: string): AiAccess | null {
-  if (!content.startsWith("---")) return null;
-  const frontmatter = content.split(/^---\s*$/m, 3)[1] ?? "";
-  const match = frontmatter.match(/^ai_access:\s*["']?(context|restricted|none)["']?\s*$/m);
-  return (match?.[1] as AiAccess | undefined) ?? null;
+  const data = readFrontmatter(content);
+  if (data) {
+    const value = data.ai_access;
+    if (value === undefined || value === null || value === "") return null;
+    return AI_ACCESS.includes(String(value)) ? value as AiAccess : "restricted";
+  }
+  // Frontmatter that is not valid YAML still honors a recognizable ai_access line.
+  const match = frontmatterBlock(content).match(/^ai_access:\s*["']?([A-Za-z]+)["']?\s*(?:#.*)?$/m);
+  if (!match) return null;
+  return AI_ACCESS.includes(match[1]!) ? match[1] as AiAccess : "restricted";
+}
+
+/** Fold case and accents for matching, so "istanbul" finds "İstanbul" and "calisma" finds "Çalışma". */
+function fold(value: string): string {
+  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/ı/g, "i");
+}
+
+function noteTitle(content: string, path: string): string {
+  return content.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] ?? basename(path, extname(path));
+}
+
+/** The route that holds daily notes: the one typed `daily`, or else the only route that keeps one note per day. */
+function dailyRouteOf(vault: VaultConfig): [string, RouteConfig] | undefined {
+  const entries = Object.entries(vault.routes);
+  const typed = entries.filter(([, route]) => route.type === "daily");
+  if (typed.length > 0) return typed[0];
+  const perDay = entries.filter(([, route]) => routePeriod(route) === "day");
+  return perDay.length === 1 ? perDay[0] : undefined;
+}
+
+/** The period of a route, if it keeps one note per period. Older configs mark daily notes only by type. */
+function routePeriod(route: RouteConfig): Period | undefined {
+  return route.period ?? (route.type === "daily" ? "day" : undefined);
 }
 
 function assertReadable(content: string, includeRestricted: boolean): void {
@@ -143,15 +271,13 @@ function isInside(root: string, candidate: string): boolean {
   return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`);
 }
 
-function detectEol(content: string): string {
-  return content.includes("\r\n") ? "\r\n" : "\n";
+async function readReceipt(path: string): Promise<Receipt | null> {
+  try { return JSON.parse(await readFile(path, "utf8")) as Receipt; } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
-function frontmatterEnd(lines: string[]): number {
-  if (lines[0]?.trim() !== "---") return 0;
-  for (let index = 1; index < lines.length; index += 1) if (lines[index]!.trim() === "---") return index + 1;
-  return 0;
-}
 
 function bumpUpdated(content: string, today: string): string {
   const lines = content.split(/\r?\n/);
@@ -165,35 +291,6 @@ function bumpUpdated(content: string, today: string): string {
   return content;
 }
 
-/** Replace the body under one heading, up to the next heading of the same or higher level. */
-export function replaceSection(content: string, heading: string, body: string): { content: string; section: string } {
-  const eol = detectEol(content);
-  const lines = content.split(/\r?\n/);
-  const wanted = heading.replace(/^#+\s*/, "").trim();
-  const headings: Array<{ index: number; level: number; text: string }> = [];
-  let fence: string | null = null;
-  for (let index = frontmatterEnd(lines); index < lines.length; index += 1) {
-    const line = lines[index]!;
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1]![0]!;
-      if (!fence) fence = marker;
-      else if (marker === fence) fence = null;
-      continue;
-    }
-    if (fence) continue;
-    const match = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
-    if (match) headings.push({ index, level: match[1]!.length, text: match[2]!.trim() });
-  }
-  const matches = headings.filter((candidate) => candidate.text === wanted);
-  if (matches.length === 0) throw new Error(`Section not found: ${wanted}`);
-  if (matches.length > 1) throw new Error(`Section heading is ambiguous: ${wanted}`);
-  const target = matches[0]!;
-  const next = headings.find((candidate) => candidate.index > target.index && candidate.level <= target.level);
-  const replacement = [lines[target.index]!, "", ...body.trim().split(/\r?\n/), ""];
-  const rebuilt = [...lines.slice(0, target.index), ...replacement, ...(next ? lines.slice(next.index) : [])];
-  return { content: rebuilt.join(eol).replace(/(\r?\n)*$/, eol), section: replacement.join(eol).trim() };
-}
 
 export function resolveMarkdownPath(root: string, relativePath: string): string {
   if (isAbsolute(relativePath)) throw new Error("Absolute note paths are not allowed.");
@@ -217,9 +314,33 @@ async function markdownFiles(root: string): Promise<string[]> {
   return output;
 }
 
+/**
+ * Read `KEY=value` lines from a `.env` file beside the config into `process.env`, without overriding
+ * variables that are already set. Scheduled tasks start without the user's shell, so secrets such as
+ * the ntfy topic reach them this way. Returns the keys it set.
+ */
+export async function loadEnvBeside(configPath: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+  let text: string;
+  try { text = await readFile(join(dirname(resolve(configPath)), ".env"), "utf8"); } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const loaded: string[] = [];
+  for (const [key, value] of Object.entries(parseEnv(text))) {
+    if (env[key] !== undefined) continue;
+    env[key] = value;
+    loaded.push(key);
+  }
+  return loaded;
+}
+
 export async function loadConfig(configPath: string): Promise<LifeKernelConfig> {
   const absoluteConfig = resolve(configPath);
-  const raw = JSON.parse(await readFile(absoluteConfig, "utf8")) as unknown;
+  const text = await readFile(absoluteConfig, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    throw new Error(`No config at ${absoluteConfig}. Run "npm run cli -- init" to create one, copy lifekernel.config.example.json to lifekernel.config.json, or point LIFEKERNEL_CONFIG or --config at your config.`);
+  });
+  const raw = JSON.parse(text) as unknown;
   const parsed = ConfigSchema.parse(raw);
   const base = dirname(absoluteConfig);
   return {
@@ -233,7 +354,26 @@ export async function loadConfig(configPath: string): Promise<LifeKernelConfig> 
 }
 
 export class LifeKernel {
-  constructor(public readonly config: LifeKernelConfig) {}
+  private readonly now: () => Date;
+
+  constructor(public readonly config: LifeKernelConfig, options: KernelOptions = {}) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  private today(): string {
+    return localDate(this.config.timezone, this.now());
+  }
+
+  /**
+   * A view of this kernel that sees only the granted vaults; vaults granted for reading only become read-only.
+   * Every method then behaves as if the other vaults did not exist. State, locks, and the clock are shared.
+   */
+  restrictTo(grants: VaultGrants): LifeKernel {
+    const vaults = this.config.vaults
+      .filter((vault) => grants.read.includes(vault.id) || grants.write.includes(vault.id))
+      .map((vault) => grants.write.includes(vault.id) ? vault : { ...vault, mode: "read-only" as const });
+    return new LifeKernel({ ...this.config, vaults }, { now: this.now });
+  }
 
   private vault(id: string): VaultConfig {
     const vault = this.config.vaults.find((candidate) => candidate.id === id);
@@ -244,7 +384,7 @@ export class LifeKernel {
   listVaults() {
     return this.config.vaults.map(({ id, kind, mode, routes }) => ({
       id, kind, mode,
-      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy }))
+      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy, ...(routePeriod(route) ? { period: routePeriod(route) } : {}), ...(route.rollup ? { rollup: true } : {}), fields: route.fields ?? [] }))
     }));
   }
 
@@ -266,29 +406,43 @@ export class LifeKernel {
     return { vaultId, path: relative(vault.path, absolute).replaceAll("\\", "/"), content, sha256: sha256(content) };
   }
 
-  async search(query: string, vaultId?: string, limit = 20, includeRestricted = false): Promise<SearchHit[]> {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) throw new Error("Search query cannot be empty.");
+  /** Markdown notes in a vault, minus its ignored folders, with vault-relative paths. */
+  private async notes(vault: VaultConfig): Promise<Array<{ file: string; path: string }>> {
+    const ignored = (vault.ignore ?? ["_templates"]).map((folder) => `${folder.replace(/^\/+|\/+$/g, "")}/`);
+    return (await markdownFiles(vault.path))
+      .map((file) => ({ file, path: relative(vault.path, file).replaceAll("\\", "/") }))
+      .filter(({ path }) => !ignored.some((prefix) => path.startsWith(prefix)));
+  }
+
+  /**
+   * Find lines in notes that contain every search term somewhere in the note, in any order.
+   * Matching ignores case and accents. `type` and `status` filter by frontmatter.
+   */
+  async search(query: string, vaultId?: string, limit = 20, includeRestricted = false, filter: { type?: string; status?: string } = {}): Promise<SearchHit[]> {
+    const terms = [...new Set(fold(query).split(/\s+/).filter(Boolean))];
+    if (terms.length === 0) throw new Error("Search query cannot be empty.");
     const vaults = vaultId ? [this.vault(vaultId)] : this.config.vaults;
     const hits: SearchHit[] = [];
     for (const vault of vaults) {
-      for (const file of await markdownFiles(vault.path)) {
+      for (const { file, path } of await this.notes(vault)) {
         const content = await readFile(file, "utf8");
         const access = aiAccessFor(content);
         if (access === "none" || (access === "restricted" && !includeRestricted)) continue;
+        if (filter.type || filter.status) {
+          const data = readFrontmatter(content) ?? {};
+          if ((filter.type && data.type !== filter.type) || (filter.status && data.status !== filter.status)) continue;
+        }
+        const folded = fold(content);
+        if (!terms.every((term) => folded.includes(term))) continue;
         const lines = content.split(/\r?\n/);
+        const hash = sha256(content);
         lines.forEach((line, index) => {
-          if (hits.length >= limit || !line.toLocaleLowerCase().includes(needle)) return;
+          if (hits.length >= limit) return;
+          const foldedLine = fold(line);
+          if (!terms.some((term) => foldedLine.includes(term))) return;
           const start = Math.max(0, index - 1);
           const end = Math.min(lines.length, index + 2);
-          hits.push({
-            vaultId: vault.id,
-            path: relative(vault.path, file).replaceAll("\\", "/"),
-            lineStart: start + 1,
-            lineEnd: end,
-            excerpt: lines.slice(start, end).join("\n"),
-            sha256: sha256(content)
-          });
+          hits.push({ vaultId: vault.id, path, lineStart: start + 1, lineEnd: end, excerpt: lines.slice(start, end).join("\n"), sha256: hash });
         });
         if (hits.length >= limit) return hits;
       }
@@ -296,23 +450,181 @@ export class LifeKernel {
     return hits;
   }
 
-  /** Look up the single daily note for a date (default: today in the configured time zone). */
-  async dailyNote(vaultId: string, date?: string, routeName?: string) {
+  /**
+   * Look up the single note for the period containing a date (default: today in the configured time zone)
+   * on a route that keeps one note per period. Pass `route`, or `period` when only one route has it.
+   */
+  async periodNote(vaultId: string, options: { route?: string; period?: Period; date?: string } = {}) {
     const vault = this.vault(vaultId);
-    const day = date ?? localDate(this.config.timezone);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("date must be YYYY-MM-DD.");
-    const candidates = Object.entries(vault.routes).filter(([name, route]) => route.type === "daily" && (!routeName || name === routeName));
-    if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no daily route${routeName ? ` named ${routeName}` : ""}.`);
-    if (candidates.length > 1) throw new Error("Several daily routes exist; pass routeName.");
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    let candidates = Object.entries(vault.routes).filter(([name, route]) => routePeriod(route) && (!options.route || name === options.route) && (!options.period || routePeriod(route) === options.period));
+    // Other routes may keep one note per day too (an inbox, for example); the daily note is the one typed daily.
+    if (options.period === "day" && !options.route && candidates.length > 1) {
+      const daily = candidates.filter(([, route]) => route.type === "daily");
+      if (daily.length === 1) candidates = daily;
+    }
+    const described = options.period === "day" ? "daily" : options.period ? `${options.period}ly` : "periodic";
+    if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no ${described} route${options.route ? ` named ${options.route}` : ""}.`);
+    if (candidates.length > 1) throw new Error(`Several ${described} routes exist; pass route.`);
     const [name, route] = candidates[0]!;
-    const path = `${route.folder}/${day}.md`;
+    const period = routePeriod(route)!;
+    const key = periodKey(period, date);
+    const base = { vaultId: vault.id, date, route: name, policy: route.policy, period, key, ...periodRange(period, date), path: `${route.folder}/${key}.md` };
     try {
-      const note = await this.readNote(vault.id, path);
-      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: true as const, path: note.path, content: note.content, sha256: note.sha256 };
+      const note = await this.readNote(vault.id, base.path);
+      return { ...base, exists: true as const, path: note.path, content: note.content, sha256: note.sha256 };
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: false as const, path };
+      return { ...base, exists: false as const };
     }
+  }
+
+  /** Look up the single daily note for a date (default: today in the configured time zone). */
+  async dailyNote(vaultId: string, date?: string, routeName?: string) {
+    return this.periodNote(vaultId, { period: "day", ...(date ? { date } : {}), ...(routeName ? { route: routeName } : {}) });
+  }
+
+  /**
+   * Where each ritual stands right now: not scheduled, upcoming, due, overdue, done, or skipped, with the
+   * streak and recently missed days. The schedule comes from the method note's frontmatter; completion
+   * comes from the daily note's `morning_plan` and `circle` fields and the review notes' `status`.
+   */
+  async ritualStatus(vaultId: string, options: { at?: Date } = {}): Promise<RitualReport> {
+    const vault = this.vault(vaultId);
+    const now = options.at ?? this.now();
+    const timeZone = this.config.timezone;
+    const today = localDate(timeZone, now);
+    const report: RitualReport = { vaultId: vault.id, now: isoInZone(now, timeZone), date: today, timeZone, quietHours: null, rituals: [] };
+    let method: Record<string, unknown>;
+    try {
+      method = readFrontmatter((await this.readNote(vault.id, vault.methodNote ?? "system/Method.md")).content) ?? {};
+    } catch (error: unknown) {
+      report.rituals = RITUAL_IDS.map((id) => ({ id, state: "not-scheduled" as const }));
+      report.error = `Method note unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      return report;
+    }
+    try { report.quietHours = parseQuietHours(method.quiet_hours); } catch (error: unknown) {
+      report.error = error instanceof Error ? error.message : String(error);
+    }
+
+    const outcome = (value: unknown): Outcome => value === "done" || value === "skipped" ? value : null;
+    const dailyCache = new Map<string, Record<string, unknown> | null>();
+    const dailyRoute = dailyRouteOf(vault)?.[1];
+    let firstActiveDate: string | null = null;
+    if (dailyRoute) {
+      const names = await readdir(resolve(vault.path, dailyRoute.folder)).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return [] as string[]; throw error; });
+      firstActiveDate = names.filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/.test(name)).map((name) => name.slice(0, 10)).sort()[0] ?? null;
+    }
+    report.rituals = await evaluateRituals(method, {
+      now, timeZone, today, firstActiveDate,
+      dailyOutcome: async (date, field) => {
+        if (!dailyCache.has(date)) {
+          // A note the agent may not read counts as not done; its fields are never exposed.
+          const found = await this.dailyNote(vault.id, date).catch(() => null);
+          dailyCache.set(date, found?.exists ? readFrontmatter(found.content) : null);
+        }
+        return outcome(dailyCache.get(date)?.[field]);
+      },
+      periodOutcome: async (period, date) => {
+        const found = await this.periodNote(vault.id, { period, date });
+        if (!found.exists) return null;
+        const status = readFrontmatter(found.content)?.status;
+        return status === "complete" ? "done" : status === "skipped" ? "skipped" : null;
+      }
+    });
+    return report;
+  }
+
+  /**
+   * Deterministic insights for the week, month, or quarter containing a date (default today): energy and its
+   * weekday pattern, focus against stated capacity, ritual consistency, and tasks planned again and again.
+   */
+  async insights(vaultId: string, options: { period?: "week" | "month" | "quarter"; date?: string } = {}): Promise<Insights> {
+    const vault = this.vault(vaultId);
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    return periodInsights(this, vault.id, options.period ?? "week", date, this.today());
+  }
+
+  /** The ritual schedule as an iCalendar feed: names and times only, never note content. */
+  async ritualCalendar(vaultId: string): Promise<string> {
+    const vault = this.vault(vaultId);
+    const method = readFrontmatter((await this.readNote(vault.id, vault.methodNote ?? "system/Method.md")).content) ?? {};
+    const now = this.now();
+    return ritualCalendar(method, { timeZone: this.config.timezone, vaultId: vault.id, today: localDate(this.config.timezone, now), now, locale: this.config.notifications?.locale ?? "en" });
+  }
+
+  /** What a ritual should cover on a date (default today), with sources. Reads only notes the agent may read. */
+  async ritualAgenda(vaultId: string, ritual: RitualId, options: { date?: string } = {}) {
+    const vault = this.vault(vaultId);
+    if (!(RITUAL_IDS as readonly string[]).includes(ritual)) throw new Error(`Unknown ritual: ${ritual}. Known: ${RITUAL_IDS.join(", ")}.`);
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    return buildAgenda(this, vault.id, ritual, date, this.today());
+  }
+
+  /** List notes by frontmatter. Notes without the filtered value are left out. */
+  async listNotes(vaultId: string, filter: { type?: string; status?: string; area?: string; folder?: string; updatedBefore?: string; updatedAfter?: string; includeRestricted?: boolean; limit?: number } = {}) {
+    const vault = this.vault(vaultId);
+    const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
+    const folder = filter.folder ? `${filter.folder.replace(/^\/+|\/+$/g, "")}/` : undefined;
+    const notes: Array<{ path: string; title: string; frontmatter: Record<string, unknown>; sha256: string }> = [];
+    for (const { file, path } of await this.notes(vault)) {
+      if (folder && !path.startsWith(folder)) continue;
+      const content = await readFile(file, "utf8");
+      const access = aiAccessFor(content);
+      if (access === "none" || (access === "restricted" && !filter.includeRestricted)) continue;
+      const data = readFrontmatter(content) ?? {};
+      if (filter.type && data.type !== filter.type) continue;
+      if (filter.status && data.status !== filter.status) continue;
+      if (filter.area && data.area !== filter.area) continue;
+      const updated = typeof data.updated === "string" ? data.updated : "";
+      if (filter.updatedBefore && !(updated && updated < filter.updatedBefore)) continue;
+      if (filter.updatedAfter && !(updated && updated > filter.updatedAfter)) continue;
+      notes.push({ path, title: noteTitle(content, path), frontmatter: data, sha256: sha256(content) });
+      if (notes.length >= limit) break;
+    }
+    return notes;
+  }
+
+  /**
+   * Open checklist items in Obsidian Tasks format, ordered by due date, then priority.
+   * `dueBy` keeps tasks due on or before a date; undated tasks are kept unless `includeUndated` is false.
+   */
+  async openTasks(filter: { vaultId?: string; path?: string; type?: string; area?: string; dueBy?: string; includeUndated?: boolean; includeRestricted?: boolean; limit?: number } = {}) {
+    if (filter.path && !filter.vaultId) throw new Error("path requires vaultId.");
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+    const vaults = filter.vaultId ? [this.vault(filter.vaultId)] : this.config.vaults;
+    const found: Array<Task & { vaultId: string; path: string; sha256: string }> = [];
+    for (const vault of vaults) {
+      const files = filter.path
+        ? [{ file: resolveMarkdownPath(vault.path, filter.path), path: relative(vault.path, resolveMarkdownPath(vault.path, filter.path)).replaceAll("\\", "/") }]
+        : await this.notes(vault);
+      for (const { file, path } of files) {
+        const content = await readFile(file, "utf8");
+        const access = aiAccessFor(content);
+        if (access === "none" || (access === "restricted" && !filter.includeRestricted)) {
+          if (filter.path) assertReadable(content, filter.includeRestricted ?? false);
+          continue;
+        }
+        if (filter.type || filter.area) {
+          const data = readFrontmatter(content) ?? {};
+          if ((filter.type && data.type !== filter.type) || (filter.area && data.area !== filter.area)) continue;
+        }
+        const hash = sha256(content);
+        for (const task of parseTasks(content)) {
+          if (task.status === "done" || task.status === "cancelled") continue;
+          if (filter.dueBy && (task.due ? task.due > filter.dueBy : filter.includeUndated === false)) continue;
+          if (!filter.dueBy && filter.includeUndated === false && !task.due) continue;
+          found.push({ vaultId: vault.id, path, sha256: hash, ...task });
+        }
+      }
+    }
+    found.sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")
+      || PRIORITY_RANK[a.priority ?? "none"] - PRIORITY_RANK[b.priority ?? "none"]
+      || a.path.localeCompare(b.path) || a.line - b.line);
+    return found.slice(0, limit);
   }
 
   /**
@@ -322,13 +634,13 @@ export class LifeKernel {
    */
   async contextBundle(vaultId: string, options: { date?: string; includeRestricted?: boolean; maxChars?: number; recentDaily?: number } = {}): Promise<ContextBundle> {
     const vault = this.vault(vaultId);
-    const date = options.date ?? localDate(this.config.timezone);
+    const date = options.date ?? this.today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
     const includeRestricted = options.includeRestricted ?? false;
     let remaining = Math.min(Math.max(options.maxChars ?? 24000, 1000), 200000);
     const paths = [...(vault.bundle ?? DEFAULT_BUNDLE)];
 
-    const dailyRoute = Object.values(vault.routes).find((route) => route.type === "daily");
+    const dailyRoute = dailyRouteOf(vault)?.[1];
     if (dailyRoute) {
       let names: string[] = [];
       try { names = await readdir(resolve(vault.path, dailyRoute.folder)); } catch (error: unknown) {
@@ -358,7 +670,9 @@ export class LifeKernel {
         else throw error;
       }
     }
-    return { vaultId: vault.id, date, notes, skipped, totalChars };
+    const bundle: ContextBundle = { vaultId: vault.id, date, notes, skipped, totalChars };
+    if (date === this.today()) bundle.rituals = await this.ritualStatus(vault.id);
+    return bundle;
   }
 
   /** Find notes that link to a note with [[path]] or [[name]] wikilinks. Only AI-readable notes are searched. */
@@ -393,11 +707,26 @@ export class LifeKernel {
     if (!route) throw new Error(`Route ${request.route} is not allowed for vault ${vault.id}.`);
     if (route.policy === "deny") throw new Error(`Route ${request.route} is denied by policy.`);
 
+    const { operation } = request;
+    if (operation === "create" && !request.title) throw new Error("title is required for create operations.");
+    if (operation === "set_frontmatter" && request.body !== undefined) throw new Error("body is not accepted for set_frontmatter operations; pass fields.");
+    if (operation !== "set_frontmatter" && request.body === undefined) throw new Error(`body is required for ${operation} operations.`);
+    if (operation === "set_frontmatter" && Object.keys(request.fields ?? {}).length === 0) throw new Error("fields is required for set_frontmatter operations.");
+    if (request.fields && operation !== "create" && operation !== "set_frontmatter") throw new Error("fields is only accepted for create and set_frontmatter operations.");
+    if (route.rollup) {
+      if (operation === "append" || operation === "update_section") throw new Error(`Route ${request.route} takes short outcomes only; create a new one instead of editing.`);
+      if (operation === "create" && (request.body!.trim().length > ROLLUP_MAX_CHARS)) throw new Error(`Route ${request.route} takes outcomes of at most ${ROLLUP_MAX_CHARS} characters; keep the detail in the source vault and link it.`);
+      if (operation === "create" && !ROLLUP_LINK.test(request.body!)) throw new Error(`Route ${request.route} needs a link to the detailed record: a [[wikilink]], a URL, or vault:path.md.`);
+    }
+    const blocked = Object.keys(request.fields ?? {}).filter((key) => !(route.fields ?? []).includes(key));
+    if (blocked.length > 0) throw new Error(`Route ${request.route} does not allow setting ${blocked.join(", ")}. Writable fields: ${(route.fields ?? []).join(", ") || "none"}.`);
+
     let path: string;
-    if (request.operation === "create") {
-      path = route.type === "daily"
-        ? `${route.folder}/${request.sourceDate}.md`
-        : `${route.folder}/${request.sourceDate}-${slugify(request.title)}.md`;
+    if (operation === "create") {
+      const period = routePeriod(route);
+      path = period
+        ? `${route.folder}/${periodKey(period, request.sourceDate)}.md`
+        : `${route.folder}/${request.sourceDate}-${slugify(request.title!, `note-${request.requestId}`)}.md`;
       if (request.targetPath) throw new Error("targetPath is not accepted for create operations.");
     } else {
       if (!request.targetPath) throw new Error(`targetPath is required for ${request.operation} operations.`);
@@ -423,8 +752,9 @@ export class LifeKernel {
     if (request.operation !== "update_section" && request.section) throw new Error("section is only accepted for update_section operations.");
     if (request.expectedSha256 && sha256(before) !== request.expectedSha256) throw new Error("Target note changed after it was read; refresh and preview again.");
 
-    const now = localDate(this.config.timezone);
-    const created = [
+    const now = this.today();
+    const body = request.body?.trim() ?? "";
+    const createdNote = () => [
       "---",
       `id: ${yamlValue(stableNoteId(vault.id, request.requestId))}`,
       `type: ${yamlValue(route.type)}`,
@@ -441,17 +771,22 @@ export class LifeKernel {
       "",
       `# ${request.title}`,
       "",
-      request.body.trim(),
+      body,
       ""
     ].join("\n");
     let after: string;
     let shown = "";
-    if (request.operation === "create") after = created;
-    else if (request.operation === "append") after = bumpUpdated(`${before.trimEnd()}\n\n${request.body.trim()}\n`, now);
-    else {
-      const replaced = replaceSection(before, request.section!, request.body);
+    if (operation === "create") after = request.fields ? setFrontmatter(createdNote(), request.fields) : createdNote();
+    else if (operation === "append") {
+      const eol = detectEol(before);
+      after = bumpUpdated(`${before.trimEnd()}${eol}${eol}${body.split(/\r?\n/).join(eol)}${eol}`, now);
+    } else if (operation === "update_section") {
+      const replaced = replaceSection(before, request.section!, body);
       after = bumpUpdated(replaced.content, now);
       shown = replaced.section;
+    } else {
+      after = bumpUpdated(setFrontmatter(before, request.fields!), now);
+      shown = `---\n${frontmatterBlock(after)}\n---`;
     }
     const canonicalPath = relative(vault.path, absolute).replaceAll("\\", "/");
     const result: PreviewResult = {
@@ -472,33 +807,93 @@ export class LifeKernel {
     return (await this.proposed(request)).preview;
   }
 
-  async applyWrite(requestInput: unknown): Promise<ApplyResult> {
+  /**
+   * Apply a write. Writes to one vault are serialized across processes by a lock file, so two agents
+   * cannot both pass the hash check and overwrite each other. A pending receipt is written before the
+   * note, so a retry after a crash finishes the write instead of failing.
+   */
+  async applyWrite(requestInput: unknown, context: WriteContext = {}): Promise<ApplyResult> {
     const request = WriteRequestSchema.parse(requestInput);
+    const vault = this.vault(request.vaultId);
     await mkdir(join(this.config.stateDir, "requests"), { recursive: true });
     const receiptPath = join(this.config.stateDir, "requests", `${request.requestId}.json`);
     const fingerprint = sha256(JSON.stringify(request));
-    try {
-      const prior = JSON.parse(await readFile(receiptPath, "utf8")) as { fingerprint: string; result: Omit<ApplyResult, "replayed"> };
-      if (prior.fingerprint !== fingerprint) throw new Error("requestId was already used with different content.");
-      return { replayed: true, ...prior.result };
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
 
-    const proposed = await this.proposed(request);
-    if (proposed.preview.policy === "review" && request.approved !== true) {
-      throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
-    }
-    await mkdir(dirname(proposed.absolute), { recursive: true });
-    await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" }).catch(async (error: unknown) => {
-      if (request.operation === "create" || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      await writeFile(proposed.absolute, proposed.after, "utf8");
+    return this.withVaultLock(vault.id, async () => {
+      const prior = await readReceipt(receiptPath);
+      if (prior && prior.fingerprint !== fingerprint) throw new Error("requestId was already used with different content.");
+      if (prior && prior.state !== "pending") return { replayed: true, ...prior.result, appliedAt: prior.result.appliedAt! };
+      if (prior && await this.currentSha256(vault, prior.result.path) === prior.result.afterSha256) {
+        return this.recordApplied(request, receiptPath, fingerprint, prior.result, context);
+      }
+
+      const proposed = await this.proposed(request);
+      if (proposed.preview.policy === "review" && request.approved !== true) {
+        throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
+      }
+      await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "pending", result: proposed.preview } satisfies Receipt, null, 2));
+      await mkdir(dirname(proposed.absolute), { recursive: true });
+      if (request.operation === "create") await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" });
+      else await replaceFile(proposed.absolute, proposed.after);
+      const applied = await this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
+      if (vault.history !== "git") return applied;
+      const history = await commitPaths(vault.path, [applied.path], `lifekernel: ${request.operation} ${applied.path}`, {
+        request: request.requestId, route: request.route, source: request.source,
+        ...(context.client?.id ? { client: context.client.id } : context.client?.name ? { client: context.client.name } : {})
+      });
+      // The note is already written; a failed commit is reported, never hidden, and does not undo the write.
+      if (!history.committed) await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "history_failed", vaultId: vault.id, path: applied.path, requestId: request.requestId, error: history.error })}\n`, "utf8");
+      return { ...applied, history };
     });
-    const result = { ...proposed.preview, appliedAt: new Date().toISOString() };
-    await writeFile(receiptPath, JSON.stringify({ fingerprint, result }, null, 2), "utf8");
+  }
+
+  private async recordApplied(request: WriteRequest, receiptPath: string, fingerprint: string, preview: PreviewResult, context: WriteContext): Promise<ApplyResult> {
+    const result = { ...preview, appliedAt: this.now().toISOString() };
+    await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "applied", result } satisfies Receipt, null, 2));
     const { preview: _content, ...auditable } = result; // the audit log records what changed, never note text
-    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_applied", ...auditable, source: request.source })}\n`, "utf8");
+    const event = { event: "write_applied", ...auditable, source: request.source, ...(context.client ? { client: context.client } : {}) };
+    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
     return { replayed: false, ...result };
+  }
+
+  private async currentSha256(vault: VaultConfig, path: string): Promise<string | null> {
+    try { return sha256(await readFile(resolveMarkdownPath(vault.path, path), "utf8")); } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private withVaultLock<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
+    return withFileLock(join(this.config.stateDir, "locks", `${vaultId}.lock`), `Vault ${vaultId} is busy with another write; try again.`, work);
+  }
+
+  /**
+   * Restore a note to its content before one applied write, using the vault's git history. Without `apply` it
+   * only reports. It refuses when the note changed after that write (undo would discard later edits) and
+   * for creates (that would delete a note). An owner action for the CLI, audited and committed like a write.
+   */
+  async undo(requestId: string, options: { apply?: boolean } = {}) {
+    const receipt = await readReceipt(join(this.config.stateDir, "requests", `${WriteRequestSchema.shape.requestId.parse(requestId)}.json`));
+    if (!receipt || (receipt.state !== "applied" && receipt.state !== undefined)) throw new Error(`No applied write has requestId ${requestId}.`);
+    const { vaultId, path, operation, afterSha256, beforeSha256 } = receipt.result;
+    const vault = this.vault(vaultId);
+    if (vault.history !== "git") throw new Error(`Vault ${vault.id} does not keep history; set "history": "git" and keep the vault in a git repository.`);
+    if (operation === "create") throw new Error("Undoing a create would delete a note, which Life Kernel never does. Change its status instead.");
+    const absolute = resolveMarkdownPath(vault.path, path);
+    const current = sha256(await readFile(absolute, "utf8"));
+    if (current !== afterSha256) throw new Error(`${path} changed after ${requestId}; undoing it would discard those later edits.`);
+    const before = await contentBefore(vault.path, path, requestId);
+    if (sha256(before.content) !== beforeSha256) throw new Error(`The history of ${path} does not match the write being undone; nothing changed.`);
+    const report = { requestId, vaultId: vault.id, path, operation, commit: before.commit, restoresSha256: beforeSha256 };
+    if (!options.apply) return { ...report, applied: false };
+    if (vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
+    return this.withVaultLock(vault.id, async () => {
+      if (sha256(await readFile(absolute, "utf8")) !== afterSha256) throw new Error(`${path} changed while undoing; nothing changed.`);
+      await replaceFile(absolute, before.content);
+      const history = await commitPaths(vault.path, [path], `lifekernel: undo ${requestId} on ${path}`, { request: `undo-${requestId}`, undoes: requestId });
+      await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_undone", vaultId: vault.id, path, requestId, beforeSha256: afterSha256, afterSha256: beforeSha256, at: this.now().toISOString() })}\n`, "utf8");
+      return { ...report, applied: true, history };
+    });
   }
 
   async validate(vaultId?: string) {
@@ -510,14 +905,83 @@ export class LifeKernel {
       for (const file of await markdownFiles(vault.path)) {
         if (relative(vault.path, file).replaceAll("\\", "/") === "AGENTS.md") continue;
         notes += 1;
-        const content = await readFile(file, "utf8");
-        const block = content.startsWith("---\n") ? content.split("---", 3)[1] ?? "" : "";
+        const block = frontmatterBlock(await readFile(file, "utf8"));
         for (const key of required) {
           if (!new RegExp(`^${key}:`, "m").test(block)) issues.push({ vaultId: vault.id, path: relative(vault.path, file).replaceAll("\\", "/"), message: `Missing frontmatter field: ${key}` });
         }
       }
     }
     return { ok: issues.length === 0, notes, issues };
+  }
+
+  /**
+   * Bring a vault made by `lifekernel init` up to the current layout. Without `apply` it only reports
+   * the changes. This is an owner action for the CLI, not an agent tool: it edits templates and the
+   * vault marker, which no route covers.
+   */
+  async migrate(vaultId: string, options: { apply?: boolean; starterDir?: string } = {}) {
+    const vault = this.vault(vaultId);
+    if (options.apply && vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
+    const plan = async () => {
+      const markerPath = join(vault.path, ".lifekernel", "vault.json");
+      let marker: { layoutVersion?: number };
+      try { marker = JSON.parse(await readFile(markerPath, "utf8")) as { layoutVersion?: number }; } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        throw new Error(`Vault ${vault.id} has no .lifekernel/vault.json, so it was not created by lifekernel init.`);
+      }
+      const from = marker.layoutVersion ?? 1;
+      const changes: Array<{ path: string; change: string; absolute: string; content: string }> = [];
+      const optional = (path: string) => readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+      /** Add blank frontmatter keys a note lacks, and apply an optional body change, as one planned change. */
+      const extend = async (path: string, keys: string[], body?: (content: string) => { content: string; change: string } | null) => {
+        const absolute = resolveMarkdownPath(vault.path, path);
+        const before = await optional(absolute);
+        const data = before === null ? null : readFrontmatter(before);
+        if (before === null || data === null) return;
+        const missing = keys.filter((key) => !(key in data));
+        let content = missing.length > 0 ? setFrontmatter(before, Object.fromEntries(missing.map((key) => [key, ""]))) : before;
+        const notes = missing.length > 0 ? [`add frontmatter fields ${missing.join(", ")}`] : [];
+        const edited = body?.(content);
+        if (edited) { content = edited.content; notes.push(edited.change); }
+        if (content !== before) changes.push({ path, change: notes.join("; "), absolute, content });
+      };
+      if (from < 3) {
+        await extend("_templates/Daily.md", Object.keys(DAILY_TEMPLATE_FIELDS), (content) => {
+          if (/^## Plan for today\s*$/m.test(content) || !/^## Day summary\s*$/m.test(content)) return null;
+          const eol = detectEol(content);
+          return { content: content.replace(/^## Day summary[ \t]*$/m, `## Plan for today${eol}${eol}## Day summary`), change: "add section Plan for today" };
+        });
+        await extend(vault.methodNote ?? "system/Method.md", RITUAL_FIELDS);
+        if (options.starterDir) {
+          const starterTemplates = join(options.starterDir, "_templates");
+          for (const name of (await readdir(starterTemplates)).filter((file) => file.endsWith(".md")).sort()) {
+            const absolute = join(vault.path, "_templates", name);
+            if (await optional(absolute) !== null) continue;
+            changes.push({ path: `_templates/${name}`, change: "add template", absolute, content: await readFile(join(starterTemplates, name), "utf8") });
+          }
+        }
+      }
+      if (from < LAYOUT_VERSION) {
+        changes.push({ path: ".lifekernel/vault.json", change: `layoutVersion ${from} -> ${LAYOUT_VERSION}`, absolute: markerPath, content: `${JSON.stringify({ ...marker, layoutVersion: LAYOUT_VERSION }, null, 2)}\n` });
+      }
+      return { from, changes };
+    };
+    const report = (from: number, changes: Array<{ path: string; change: string }>, applied: boolean) => ({
+      vaultId: vault.id, from, to: Math.max(from, LAYOUT_VERSION), changes: changes.map(({ path, change }) => ({ path, change })), applied
+    });
+    if (!options.apply) { const { from, changes } = await plan(); return report(from, changes, false); }
+    return this.withVaultLock(vault.id, async () => {
+      const { from, changes } = await plan();
+      for (const change of changes) {
+        await mkdir(dirname(change.absolute), { recursive: true });
+        await replaceFile(change.absolute, change.content);
+      }
+      if (changes.length > 0) {
+        const event = { event: "vault_migrated", vaultId: vault.id, from, to: LAYOUT_VERSION, paths: changes.map((change) => change.path), at: this.now().toISOString() };
+        await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
+      }
+      return report(from, changes, changes.length > 0);
+    });
   }
 
   async recentAudit(limit = 20) {

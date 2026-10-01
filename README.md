@@ -36,7 +36,9 @@ flowchart LR
 - **Agent-ready:** connect through MCP over stdio or authenticated Streamable HTTP.
 - **Source-backed:** search results include file, line, and SHA-256 provenance.
 - **Controlled writes:** routes, previews, request IDs, expected hashes, and audit events guard mutations.
-- **Portable behavior:** skills define onboarding, reflection, review, and project-memory workflows.
+- **Portable behavior:** skills define onboarding, the morning plan, the daily circle, weekly, monthly, and quarterly reviews, and project memory.
+- **One hub, many agents:** personal, startup, and work vaults side by side; each client sees only the vaults it was granted, writes are named per agent, and a git-backed vault can undo a write.
+- **Rituals that keep their rhythm:** the server knows when each ritual is due and what it should cover, so every connected agent can offer it at the right time. Optional reminders reach your phone (ntfy or Telegram, with snooze and skip buttons), desktop, email, webhook, or calendar, and you can capture a thought into the inbox from Telegram, a phone shortcut, or the CLI.
 
 ## Quick start
 
@@ -47,10 +49,11 @@ git clone https://github.com/poyrazavsever/Life-Kernel.git
 cd Life-Kernel
 npm install
 npm run build
-cp lifekernel.config.example.json lifekernel.config.json
 npm run cli -- init ./vaults/personal
 npm run cli -- doctor
 ```
+
+`init` copies the starter vault and, when no `lifekernel.config.json` exists, writes one for it with your computer's time zone. Secrets such as tokens and the ntfy topic go in a `.env` file next to the config (see `.env.example`); every entry point reads it.
 
 Start a local MCP server:
 
@@ -74,8 +77,11 @@ The HTTP server exposes `/mcp` and a small REST surface under `/v1`. Continue wi
 - search Markdown with file, line, and SHA-256 provenance;
 - read one safe relative Markdown path while enforcing `ai_access`;
 - fetch a bounded session context bundle and find backlinks;
-- look up the single daily note for a date;
-- preview a routed create, append, or section update;
+- look up the single daily, weekly, monthly, or quarterly note for a date;
+- list notes by type, status, or area, and collect open tasks by due date;
+- see which rituals (morning plan, daily circle, weekly, monthly, and quarterly reviews) are due, and get each one's agenda;
+- measure a week, month, or quarter: energy patterns, focus against capacity, ritual consistency, and tasks carried day after day;
+- preview a routed create, append, section update, or frontmatter change;
 - apply the exact request idempotently;
 - validate required frontmatter and inspect recent audit events.
 
@@ -102,7 +108,10 @@ assets/brand             canonical visual identity assets
 - [Self-hosting](docs/self-hosting.md)
 - [Security model](docs/security-model.md)
 - [Skills](docs/skills.md)
+- [Ritual reminders](docs/notifications.md)
+- [Personal, startup, and work vaults in one hub](docs/hub.md)
 - [Brand guide](docs/brand.md)
+- [Roadmap](docs/roadmap.md)
 
 ## Principles
 

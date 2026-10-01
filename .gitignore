@@ -12,6 +12,8 @@ private-docs/
 Thumbs.db
 
 lifekernel.config.json
+# Vaults created inside the checkout hold personal notes.
+vaults/
 .tmp/
 
 skills-lock.json

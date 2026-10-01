@@ -58,6 +58,7 @@ After connecting, say "Set up my Life Kernel vault." The agent loads the onboard
 - **Audit:** `audit.jsonl` records client registration, approvals, denials, failed sign-ins, and every applied write (path, hashes, and size, never note text). It never contains secrets or tokens.
 - **Failed sign-ins:** five wrong owner secrets from one address lock the consent page for 15 minutes.
 - **Back up** the vault and the state directory.
+- **Reminders:** set `LIFEKERNEL_SCHEDULER=on` and an ntfy topic or webhook to send ritual reminders from the server, and `LIFEKERNEL_CALENDAR_TOKEN` for a calendar feed. See [ritual reminders](notifications.md).
 
 ## Security notes
 

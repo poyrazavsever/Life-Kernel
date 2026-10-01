@@ -14,42 +14,94 @@
           "type": "session",
           "status": "active",
           "area": "system",
-          "policy": "auto"
+          "policy": "auto",
+          "fields": [
+            "status"
+          ]
         },
         "daily": {
           "folder": "daily",
           "type": "daily",
           "status": "active",
           "area": "life",
-          "policy": "auto"
+          "policy": "auto",
+          "period": "day",
+          "fields": [
+            "energy",
+            "focus_hours",
+            "morning_plan",
+            "circle",
+            "circle_at"
+          ]
         },
         "review": {
           "folder": "reviews",
           "type": "weekly-review",
           "status": "active",
           "area": "life",
-          "policy": "auto"
+          "policy": "auto",
+          "period": "week",
+          "fields": [
+            "status"
+          ]
+        },
+        "monthly": {
+          "folder": "reviews",
+          "type": "monthly-review",
+          "status": "active",
+          "area": "life",
+          "policy": "auto",
+          "period": "month",
+          "fields": [
+            "status"
+          ]
+        },
+        "quarterly": {
+          "folder": "reviews",
+          "type": "quarterly-review",
+          "status": "active",
+          "area": "life",
+          "policy": "auto",
+          "period": "quarter",
+          "fields": [
+            "status"
+          ]
         },
         "decision": {
           "folder": "decisions",
           "type": "decision",
           "status": "proposed",
           "area": "system",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "decided_on",
+            "supersedes"
+          ]
         },
         "goal": {
           "folder": "goals",
           "type": "goal",
           "status": "active",
           "area": "life",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "horizon",
+            "target_date"
+          ]
         },
         "project": {
           "folder": "projects",
           "type": "project",
           "status": "active",
           "area": "projects",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "due",
+            "next_action"
+          ]
         },
         "plan": {
           "folder": "schedule",
@@ -63,7 +115,11 @@
           "type": "note",
           "status": "inbox",
           "area": "system",
-          "policy": "auto"
+          "policy": "auto",
+          "fields": [
+            "status"
+          ],
+          "period": "day"
         },
         "state": {
           "folder": "state",
@@ -84,16 +140,64 @@
           "type": "method",
           "status": "active",
           "area": "system",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "morning_plan_time",
+            "morning_plan_days",
+            "daily_circle_time",
+            "daily_circle_days",
+            "weekly_review_day",
+            "weekly_review_time",
+            "monthly_review_day",
+            "monthly_review_time",
+            "quarterly_review_day",
+            "quarterly_review_time",
+            "quiet_hours"
+          ]
         },
         "area": {
           "folder": "areas",
           "type": "area",
           "status": "active",
           "area": "life",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status"
+          ]
+        },
+        "outcome": {
+          "folder": "outcomes",
+          "type": "outcome",
+          "status": "active",
+          "area": "work",
+          "policy": "auto",
+          "rollup": true,
+          "fields": [
+            "status"
+          ]
         }
       }
     }
-  ]
+  ],
+  "notifications": {
+    "enabled": false,
+    "locale": "en",
+    "followUpAfterMinutes": 90,
+    "channels": [
+      {
+        "type": "ntfy",
+        "content": "minimal",
+        "openUrl": "https://claude.ai/new?q={prompt}"
+      }
+    ],
+    "briefs": {
+      "enabled": false,
+      "rituals": [
+        "morning-plan"
+      ],
+      "model": "claude-opus-5-5",
+      "effort": "low",
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    }
+  }
 }
