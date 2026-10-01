@@ -20,11 +20,14 @@ function output(value: unknown) { process.stdout.write(`${JSON.stringify(value, 
 
 async function main() {
   if (command === "init") {
-    const target = resolve(invocationRoot, args[0] ?? "vaults/personal");
-    const template = resolve(here, "../../../templates/starter-vault");
+    const template = flag("--template") ?? "personal";
+    if (!isTemplate(template)) throw new Error(`Unknown template ${template}. Use ${TEMPLATES.join(", ")}.`);
+    const id = flag("--id") ?? template;
+    if (!/^[a-z0-9][a-z0-9-_]*$/.test(id)) throw new Error("--id must use lowercase letters, digits, - and _.");
+    const target = resolve(invocationRoot, positional()[0] ?? `vaults/${template}`);
     await mkdir(target, { recursive: true });
-    await cp(template, target, { recursive: true, errorOnExist: false, force: false });
-    output({ ok: true, target, config: await createConfig(target) });
+    await cp(resolve(here, "../../../templates", template === "personal" ? "starter-vault" : `${template}-vault`), target, { recursive: true, errorOnExist: false, force: false });
+    output({ ok: true, target, template, config: await registerVault(target, template, id) });
     return;
   }
   if (command === "connect") {
@@ -97,18 +100,45 @@ ${content}
   process.exitCode = 1;
 }
 
+const TEMPLATES = ["personal", "startup", "work"] as const;
+type Template = (typeof TEMPLATES)[number];
+const isTemplate = (value: string): value is Template => (TEMPLATES as readonly string[]).includes(value);
+
+function flag(name: string): string | undefined {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+/** Arguments that are neither flags nor flag values. */
+function positional(): string[] {
+  return args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && args[index - 1]!.startsWith("--") && ["--template", "--id", "--every", "--config"].includes(args[index - 1]!)));
+}
+
+type ConfigFile = { timezone?: string; vaults: Array<{ id: string; kind: string; path: string; mode: string; routes: Record<string, unknown> }> } & Record<string, unknown>;
+
 /**
- * Write a config for a new vault from the example, unless one exists: the vault path relative to the
- * config, and this computer's time zone. Returns what happened, so `init` can say so.
+ * Add the new vault to the config, or write a config if none exists (from the example for a personal
+ * vault). An existing vault with the same ID or path is left alone. Returns what happened.
  */
-async function createConfig(vault: string) {
+async function registerVault(vault: string, template: Template, id: string) {
   const path = resolve(configPath);
-  try { await readFile(path); return { path, created: false }; } catch { /* write a new one below */ }
-  const example = JSON.parse(await readFile(resolve(here, "../../../lifekernel.config.example.json"), "utf8")) as { timezone: string; vaults: Array<{ path: string }> };
-  example.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  example.vaults[0]!.path = `./${relative(dirname(path), vault).replaceAll("\\", "/")}`;
-  await writeFile(path, `${JSON.stringify(example, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-  return { path, created: true };
+  const example = JSON.parse(await readFile(resolve(here, "../../../lifekernel.config.example.json"), "utf8")) as ConfigFile;
+  const routes = template === "personal" ? example.vaults[0]!.routes : JSON.parse(await readFile(resolve(vault, ".lifekernel", "routes.json"), "utf8")) as Record<string, unknown>;
+  const entry = { id, kind: template, path: `./${relative(dirname(path), vault).replaceAll("\\", "/")}`, mode: "read-write", routes };
+  let existing: ConfigFile | null = null;
+  try { existing = JSON.parse(await readFile(path, "utf8")) as ConfigFile; } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!existing) {
+    const fresh = template === "personal" ? { ...example, vaults: [entry] } : { version: 1, stateDir: "./.lifekernel-data", vaults: [entry] };
+    await writeFile(path, `${JSON.stringify({ ...fresh, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    return { path, created: true, added: id };
+  }
+  const samePath = existing.vaults.find((candidate) => resolve(dirname(path), candidate.path) === resolve(vault));
+  if (samePath || existing.vaults.some((candidate) => candidate.id === id)) return { path, created: false, added: null, existing: samePath?.id ?? id };
+  existing.vaults.push(entry);
+  await writeFile(path, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  return { path, created: false, added: id };
 }
 
 function ritualArg(value: string | undefined): RitualId {

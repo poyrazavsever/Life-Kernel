@@ -43,6 +43,15 @@ try {
   const generated = run("doctor");
   if (!generated.ok || !generated.checks[0].path.replaceAll("\\", "/").endsWith("vaults/personal")) throw new Error(`the generated config does not point at the vault: ${JSON.stringify(generated)}`);
   if (run("init", "vaults/personal").config.created) throw new Error("init must not overwrite an existing config");
+  for (const template of ["startup", "work"]) {
+    const added = run("init", `vaults/${template}`, "--template", template);
+    if (added.config.added !== template) throw new Error(`init --template ${template} should add the vault: ${JSON.stringify(added)}`);
+    const broken = await brokenLinks(join(work, "vaults", template));
+    if (broken.length) throw new Error(`broken wikilinks in the ${template} template: ${broken.join("; ")}`);
+  }
+  const all = run("validate");
+  if (!all.ok) throw new Error(`templates fail validation: ${JSON.stringify(all.issues)}`);
+  if (run("vaults").map((vault) => vault.id).join(",") !== "personal,startup,work") throw new Error("init should register every template vault");
   await writeFile(join(work, "lifekernel.config.json"), JSON.stringify({
     version: 1, stateDir: "./state", timezone: "UTC",
     vaults: [{ id: "personal", kind: "personal", path: "./vaults/personal", mode: "read-write", routes: {} }]
