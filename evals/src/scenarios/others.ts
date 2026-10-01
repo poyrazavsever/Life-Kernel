@@ -97,7 +97,7 @@ export const weeklyReview: Scenario = {
       id: "decision-accepted", kind: "outcome", description: "Records the 22:00 decision as accepted with its date",
       run: (ctx) => { const decisions = notesIn(ctx, "decisions", "Decisions.md"); const found = decisions.find((path) => /22:00/.test(ctx.read(path) ?? "")); const fm = found ? ctx.frontmatter(found) : null; return { pass: !!fm && fmString(fm.status) === "accepted" && fmString(fm.decided_on) !== "", detail: found ? `${found}: status=${fmString(fm?.status)}` : "no decision note mentions 22:00" }; }
     },
-    { id: "plan-updated", kind: "outcome", description: "Updates the near-term plan", run: (ctx) => ctx.read("schedule/Near-Term Plan.md") !== null && (section(ctx, "schedule/Near-Term Plan.md", "This week") ?? "") !== "" },
+    { id: "plan-updated", kind: "outcome", description: "Updates the near-term plan", run: (ctx) => ctx.changed("schedule/Near-Term Plan.md") },
     { id: "replies", kind: "outcome", description: "Ends with a message to the user", run: (ctx) => ctx.finalText.trim().length > 0 }
   ]
 };

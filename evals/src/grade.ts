@@ -67,6 +67,7 @@ export async function context(sandbox: Sandbox, finalText: string): Promise<{ ct
     audit,
     read: (path) => notes.get(path) ?? null,
     frontmatter: (path) => { const body = notes.get(path); return body ? readFrontmatter(body) : null; },
+    changed: (path) => { const body = notes.get(path); return body !== null && body !== undefined && baseline.files[path] !== sha256(body); },
     list: (folder) => [...notes.keys()].filter((path) => folder === "" || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`)).sort()
   };
   return { ctx, baseline };

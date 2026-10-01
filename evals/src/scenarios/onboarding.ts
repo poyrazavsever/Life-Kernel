@@ -32,7 +32,7 @@ export const onboarding: Scenario = {
     await edit("schedule/Availability.md", { operation: "update_section", route: "plan", section: "Fixed commitments", body: "| Day | Time | Commitment |\n| --- | --- | --- |\n| Mon, Wed | 09:00-13:00 | Classes |\n| Tue, Thu, Fri | 13:00-18:00 | Work |" });
     const goals: Array<[string, string, string]> = [
       ["Finish the thesis draft", "short", "2026-12-15"],
-      ["Graduate", "medium", "2027-06-30"],
+      ["Graduate", "medium", "2027-06"],
       ["Become a backend engineer", "long", ""]
     ];
     for (const [title, horizon, target] of goals) {
@@ -82,6 +82,13 @@ export const onboarding: Scenario = {
     {
       id: "thesis-target-date", kind: "outcome", description: "Gives the thesis goal its date, 2026-12-15",
       run: (ctx) => notesIn(ctx, "goals", "Goals.md").some((path) => fmString(ctx.frontmatter(path)?.target_date) === "2026-12-15" && /thesis/i.test(ctx.read(path) ?? ""))
+    },
+    {
+      id: "no-invented-dates", kind: "outcome", description: "Does not turn \"in June\" or \"in January\" into an exact day the user never gave",
+      run: (ctx) => {
+        const invented = notesIn(ctx, "goals", "Goals.md").filter((path) => !/thesis/i.test(ctx.read(path) ?? "")).map((path) => ({ path, date: fmString(ctx.frontmatter(path)?.target_date) })).filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+        return { pass: invented.length === 0, detail: invented.map(({ path, date }) => `${path}: ${date}`).join("; ") };
+      }
     },
     {
       id: "projects-with-next-actions", kind: "outcome", description: "Creates the Thesis and Pebble projects with the next actions the user gave",

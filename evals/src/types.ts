@@ -31,6 +31,8 @@ export interface GradeContext {
   read(path: string): string | null;
   /** A vault note's frontmatter, or null. */
   frontmatter(path: string): Record<string, unknown> | null;
+  /** Whether a note differs from what the scenario's seed left (or did not exist then). */
+  changed(path: string): boolean;
   /** Vault-relative paths of Markdown notes under a folder. */
   list(folder: string): string[];
 }
