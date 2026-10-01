@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 const RouteSchema = z.object({
@@ -75,6 +76,19 @@ export interface PreviewResult {
 }
 export type ApplyResult = PreviewResult & { appliedAt: string; replayed: boolean };
 
+/** Who asked for a write. `id` comes from authentication; `name` is what the client calls itself. */
+export interface WriteContext { client?: { id?: string; name?: string } }
+
+export interface KernelOptions {
+  /** Clock used for dates and timestamps; tests pass a fixed one. */
+  now?: () => Date;
+}
+
+interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: PreviewResult & { appliedAt?: string } }
+
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_STALE_MS = 30_000;
+
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -112,10 +126,14 @@ export interface ContextBundle {
 
 export interface Backlink { path: string; line: number; excerpt: string; sha256: string }
 
-function slugify(value: string): string {
-  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
-  const slug = normalized.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug || `note-${Date.now()}`;
+// Letters that NFKD does not decompose into an ASCII base letter.
+const TRANSLITERATIONS: Record<string, string> = { "\u0131": "i", "\u00df": "ss", "\u00e6": "ae", "\u00f8": "o", "\u0153": "oe", "\u0111": "d", "\u0142": "l", "\u00fe": "th" };
+
+function slugify(value: string, fallback: string): string {
+  const normalized = value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const ascii = normalized.replace(/[\u0131\u00df\u00e6\u00f8\u0153\u0111\u0142\u00fe]/g, (letter) => TRANSLITERATIONS[letter]!);
+  const slug = ascii.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || fallback;
 }
 
 function yamlValue(value: string): string {
@@ -125,9 +143,7 @@ function yamlValue(value: string): string {
 type AiAccess = "context" | "restricted" | "none";
 
 function aiAccessFor(content: string): AiAccess | null {
-  if (!content.startsWith("---")) return null;
-  const frontmatter = content.split(/^---\s*$/m, 3)[1] ?? "";
-  const match = frontmatter.match(/^ai_access:\s*["']?(context|restricted|none)["']?\s*$/m);
+  const match = frontmatterBlock(content).match(/^ai_access:\s*["']?(context|restricted|none)["']?\s*$/m);
   return (match?.[1] as AiAccess | undefined) ?? null;
 }
 
@@ -151,6 +167,32 @@ function frontmatterEnd(lines: string[]): number {
   if (lines[0]?.trim() !== "---") return 0;
   for (let index = 1; index < lines.length; index += 1) if (lines[index]!.trim() === "---") return index + 1;
   return 0;
+}
+
+/** The YAML lines between the opening and closing `---`, or "" when the note has none. Accepts LF, CRLF, and a BOM. */
+function frontmatterBlock(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const end = frontmatterEnd(lines);
+  return end ? lines.slice(1, end - 1).join("\n") : "";
+}
+
+async function readReceipt(path: string): Promise<Receipt | null> {
+  try { return JSON.parse(await readFile(path, "utf8")) as Receipt; } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Write through a temporary sibling and rename it, so a crash never leaves a half-written file. */
+async function replaceFile(path: string, content: string): Promise<void> {
+  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  await writeFile(temporary, content, "utf8");
+  try { await rename(temporary, path); } catch (error: unknown) {
+    // Windows refuses to replace a file another program holds open; fall back to an in-place write.
+    if (!["EPERM", "EACCES", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    await rm(temporary, { force: true });
+    await writeFile(path, content, "utf8");
+  }
 }
 
 function bumpUpdated(content: string, today: string): string {
@@ -233,7 +275,15 @@ export async function loadConfig(configPath: string): Promise<LifeKernelConfig> 
 }
 
 export class LifeKernel {
-  constructor(public readonly config: LifeKernelConfig) {}
+  private readonly now: () => Date;
+
+  constructor(public readonly config: LifeKernelConfig, options: KernelOptions = {}) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  private today(): string {
+    return localDate(this.config.timezone, this.now());
+  }
 
   private vault(id: string): VaultConfig {
     const vault = this.config.vaults.find((candidate) => candidate.id === id);
@@ -299,7 +349,7 @@ export class LifeKernel {
   /** Look up the single daily note for a date (default: today in the configured time zone). */
   async dailyNote(vaultId: string, date?: string, routeName?: string) {
     const vault = this.vault(vaultId);
-    const day = date ?? localDate(this.config.timezone);
+    const day = date ?? this.today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("date must be YYYY-MM-DD.");
     const candidates = Object.entries(vault.routes).filter(([name, route]) => route.type === "daily" && (!routeName || name === routeName));
     if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no daily route${routeName ? ` named ${routeName}` : ""}.`);
@@ -322,7 +372,7 @@ export class LifeKernel {
    */
   async contextBundle(vaultId: string, options: { date?: string; includeRestricted?: boolean; maxChars?: number; recentDaily?: number } = {}): Promise<ContextBundle> {
     const vault = this.vault(vaultId);
-    const date = options.date ?? localDate(this.config.timezone);
+    const date = options.date ?? this.today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
     const includeRestricted = options.includeRestricted ?? false;
     let remaining = Math.min(Math.max(options.maxChars ?? 24000, 1000), 200000);
@@ -397,7 +447,7 @@ export class LifeKernel {
     if (request.operation === "create") {
       path = route.type === "daily"
         ? `${route.folder}/${request.sourceDate}.md`
-        : `${route.folder}/${request.sourceDate}-${slugify(request.title)}.md`;
+        : `${route.folder}/${request.sourceDate}-${slugify(request.title, `note-${request.requestId}`)}.md`;
       if (request.targetPath) throw new Error("targetPath is not accepted for create operations.");
     } else {
       if (!request.targetPath) throw new Error(`targetPath is required for ${request.operation} operations.`);
@@ -423,7 +473,7 @@ export class LifeKernel {
     if (request.operation !== "update_section" && request.section) throw new Error("section is only accepted for update_section operations.");
     if (request.expectedSha256 && sha256(before) !== request.expectedSha256) throw new Error("Target note changed after it was read; refresh and preview again.");
 
-    const now = localDate(this.config.timezone);
+    const now = this.today();
     const created = [
       "---",
       `id: ${yamlValue(stableNoteId(vault.id, request.requestId))}`,
@@ -447,7 +497,10 @@ export class LifeKernel {
     let after: string;
     let shown = "";
     if (request.operation === "create") after = created;
-    else if (request.operation === "append") after = bumpUpdated(`${before.trimEnd()}\n\n${request.body.trim()}\n`, now);
+    else if (request.operation === "append") {
+      const eol = detectEol(before);
+      after = bumpUpdated(`${before.trimEnd()}${eol}${eol}${request.body.trim().split(/\r?\n/).join(eol)}${eol}`, now);
+    }
     else {
       const replaced = replaceSection(before, request.section!, request.body);
       after = bumpUpdated(replaced.content, now);
@@ -472,33 +525,75 @@ export class LifeKernel {
     return (await this.proposed(request)).preview;
   }
 
-  async applyWrite(requestInput: unknown): Promise<ApplyResult> {
+  /**
+   * Apply a write. Writes to one vault are serialized across processes by a lock file, so two agents
+   * cannot both pass the hash check and overwrite each other. A pending receipt is written before the
+   * note, so a retry after a crash finishes the write instead of failing.
+   */
+  async applyWrite(requestInput: unknown, context: WriteContext = {}): Promise<ApplyResult> {
     const request = WriteRequestSchema.parse(requestInput);
+    const vault = this.vault(request.vaultId);
     await mkdir(join(this.config.stateDir, "requests"), { recursive: true });
     const receiptPath = join(this.config.stateDir, "requests", `${request.requestId}.json`);
     const fingerprint = sha256(JSON.stringify(request));
-    try {
-      const prior = JSON.parse(await readFile(receiptPath, "utf8")) as { fingerprint: string; result: Omit<ApplyResult, "replayed"> };
-      if (prior.fingerprint !== fingerprint) throw new Error("requestId was already used with different content.");
-      return { replayed: true, ...prior.result };
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
 
-    const proposed = await this.proposed(request);
-    if (proposed.preview.policy === "review" && request.approved !== true) {
-      throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
-    }
-    await mkdir(dirname(proposed.absolute), { recursive: true });
-    await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" }).catch(async (error: unknown) => {
-      if (request.operation === "create" || (error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      await writeFile(proposed.absolute, proposed.after, "utf8");
+    return this.withVaultLock(vault.id, async () => {
+      const prior = await readReceipt(receiptPath);
+      if (prior && prior.fingerprint !== fingerprint) throw new Error("requestId was already used with different content.");
+      if (prior && prior.state !== "pending") return { replayed: true, ...prior.result, appliedAt: prior.result.appliedAt! };
+      if (prior && await this.currentSha256(vault, prior.result.path) === prior.result.afterSha256) {
+        return this.recordApplied(request, receiptPath, fingerprint, prior.result, context);
+      }
+
+      const proposed = await this.proposed(request);
+      if (proposed.preview.policy === "review" && request.approved !== true) {
+        throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
+      }
+      await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "pending", result: proposed.preview } satisfies Receipt, null, 2));
+      await mkdir(dirname(proposed.absolute), { recursive: true });
+      if (request.operation === "create") await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" });
+      else await replaceFile(proposed.absolute, proposed.after);
+      return this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
     });
-    const result = { ...proposed.preview, appliedAt: new Date().toISOString() };
-    await writeFile(receiptPath, JSON.stringify({ fingerprint, result }, null, 2), "utf8");
+  }
+
+  private async recordApplied(request: WriteRequest, receiptPath: string, fingerprint: string, preview: PreviewResult, context: WriteContext): Promise<ApplyResult> {
+    const result = { ...preview, appliedAt: this.now().toISOString() };
+    await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "applied", result } satisfies Receipt, null, 2));
     const { preview: _content, ...auditable } = result; // the audit log records what changed, never note text
-    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_applied", ...auditable, source: request.source })}\n`, "utf8");
+    const event = { event: "write_applied", ...auditable, source: request.source, ...(context.client ? { client: context.client } : {}) };
+    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
     return { replayed: false, ...result };
+  }
+
+  private async currentSha256(vault: VaultConfig, path: string): Promise<string | null> {
+    try { return sha256(await readFile(resolveMarkdownPath(vault.path, path), "utf8")); } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private async withVaultLock<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
+    const lockDir = join(this.config.stateDir, "locks");
+    await mkdir(lockDir, { recursive: true });
+    const lockPath = join(lockDir, `${vaultId}.lock`);
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    for (;;) {
+      try {
+        const handle = await open(lockPath, "wx");
+        await handle.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+        await handle.close();
+        break;
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+      // A process that crashed while holding the lock leaves it behind; take it over once it is clearly stale.
+      const age = await stat(lockPath).then((info) => Date.now() - info.mtimeMs, () => 0);
+      if (age > LOCK_STALE_MS) { await rm(lockPath, { force: true }); continue; }
+      if (Date.now() > deadline) throw new Error(`Vault ${vaultId} is busy with another write; try again.`);
+      await delay(20 + Math.floor(Math.random() * 40));
+    }
+    try { return await work(); } finally { await rm(lockPath, { force: true }); }
   }
 
   async validate(vaultId?: string) {
@@ -510,8 +605,7 @@ export class LifeKernel {
       for (const file of await markdownFiles(vault.path)) {
         if (relative(vault.path, file).replaceAll("\\", "/") === "AGENTS.md") continue;
         notes += 1;
-        const content = await readFile(file, "utf8");
-        const block = content.startsWith("---\n") ? content.split("---", 3)[1] ?? "" : "";
+        const block = frontmatterBlock(await readFile(file, "utf8"));
         for (const key of required) {
           if (!new RegExp(`^${key}:`, "m").test(block)) issues.push({ vaultId: vault.id, path: relative(vault.path, file).replaceAll("\\", "/"), message: `Missing frontmatter field: ${key}` });
         }

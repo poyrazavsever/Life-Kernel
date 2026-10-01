@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,8 +14,11 @@ async function fixture() {
     timezone: "UTC",
     vaults: [{ id: "test", kind: "project", path: vault, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "project", policy: "auto" }, reviewed: { folder: "reviewed", type: "decision", status: "proposed", area: "project", policy: "review" }, blocked: { folder: "blocked", type: "note", status: "active", area: "project", policy: "deny" } } }]
   };
-  return { root, vault, kernel: new LifeKernel(config) };
+  return { root, vault, config, kernel: new LifeKernel(config, { now: () => NOW }) };
 }
+
+const NOW = new Date("2026-09-30T12:00:00Z");
+const frontmatter = (access = "context") => `---\nid: x\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: ${access}\n---\n`;
 
 describe("path policy", () => {
   it("rejects paths outside a vault", async () => {
@@ -275,5 +278,121 @@ describe("audit log", () => {
     expect(event).toMatchObject({ event: "write_applied", path: "sessions/2026-09-30-private.md", operation: "create" });
     expect(JSON.stringify(event)).not.toContain("Highly personal sentence");
     expect(event).not.toHaveProperty("preview");
+  });
+});
+
+describe("line endings", () => {
+  const crlf = (text: string) => text.replaceAll("\n", "\r\n");
+
+  it("validates and enforces AI access on CRLF notes and notes with a BOM", async () => {
+    const { kernel, vault } = await fixture();
+    await writeFile(join(vault, "windows.md"), crlf(`${frontmatter()}\n# Windows\n`), "utf8");
+    await writeFile(join(vault, "bom.md"), `﻿${frontmatter()}\n# Bom\n`, "utf8");
+    await writeFile(join(vault, "hidden.md"), crlf(`${frontmatter("none")}\n# Hidden needle\n`), "utf8");
+    expect(await kernel.validate("test")).toEqual({ ok: true, notes: 3, issues: [] });
+    await expect(kernel.readNote("test", "hidden.md", true)).rejects.toThrow(/excluded/);
+    await expect(kernel.search("needle", "test", 20, true)).resolves.toEqual([]);
+  });
+
+  it("keeps CRLF line endings when appending", async () => {
+    const { kernel, vault } = await fixture();
+    await mkdir(join(vault, "sessions"));
+    await writeFile(join(vault, "sessions/log.md"), crlf(`${frontmatter()}\n# Log\n`), "utf8");
+    const read = await kernel.readNote("test", "sessions/log.md");
+    await kernel.applyWrite({ requestId: "request-0501", vaultId: "test", operation: "append", route: "session", title: "Log", targetPath: "sessions/log.md", expectedSha256: read.sha256, body: "First line.\nSecond line.", source: "test", sourceDate: "2026-09-30" });
+    const after = await readFile(join(vault, "sessions/log.md"), "utf8");
+    expect(after).toContain("# Log\r\n\r\nFirst line.\r\nSecond line.\r\n");
+    expect(after.replaceAll("\r\n", "")).not.toContain("\n");
+  });
+});
+
+describe("slugs", () => {
+  it("transliterates Turkish and other letters that NFKD leaves alone", async () => {
+    const { kernel } = await fixture();
+    const preview = await kernel.previewWrite({ requestId: "request-0601", vaultId: "test", operation: "create", route: "session", title: "Kısa vadeli hedef: İstanbul'da Çalışma Şekli", body: "x", source: "test", sourceDate: "2026-09-30" });
+    expect(preview.path).toBe("sessions/2026-09-30-kisa-vadeli-hedef-istanbul-da-calisma-sekli.md");
+  });
+
+  it("falls back to a slug derived from the request ID, so preview and apply agree", async () => {
+    const { kernel } = await fixture();
+    const request = { requestId: "request-0602", vaultId: "test", operation: "create", route: "session", title: "日本語", body: "x", source: "test", sourceDate: "2026-09-30" };
+    const preview = await kernel.previewWrite(request);
+    expect(preview.path).toBe("sessions/2026-09-30-note-request-0602.md");
+    expect((await kernel.applyWrite(request)).path).toBe(preview.path);
+  });
+});
+
+describe("concurrent writers", () => {
+  it("lets exactly one of two processes win a race on the same note", async () => {
+    const { config, vault } = await fixture();
+    await mkdir(join(vault, "sessions"));
+    await writeFile(join(vault, "sessions/state.md"), `${frontmatter()}\n# State\n\n## Now\n\nOld.\n`, "utf8");
+    const [first, second] = [new LifeKernel(config, { now: () => NOW }), new LifeKernel(config, { now: () => NOW })];
+    const { sha256 } = await first.readNote("test", "sessions/state.md");
+    const request = (requestId: string, body: string) => ({ requestId, vaultId: "test", operation: "update_section", route: "session", title: "State", targetPath: "sessions/state.md", section: "Now", expectedSha256: sha256, body, source: "test", sourceDate: "2026-09-30" });
+    const results = await Promise.allSettled([first.applyWrite(request("race-0001", "From A.")), second.applyWrite(request("race-0002", "From B."))]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const failure = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+    expect(String(failure.reason)).toMatch(/changed after it was read/);
+    const after = await readFile(join(vault, "sessions/state.md"), "utf8");
+    expect(after.includes("From A.")).not.toBe(after.includes("From B."));
+  });
+
+  it("takes over a stale lock left by a crashed process", async () => {
+    const { kernel, config } = await fixture();
+    await mkdir(join(config.stateDir, "locks"), { recursive: true });
+    const lock = join(config.stateDir, "locks/test.lock");
+    await writeFile(lock, "{}", "utf8");
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    await expect(kernel.applyWrite({ requestId: "request-0701", vaultId: "test", operation: "create", route: "session", title: "After crash", body: "x", source: "test", sourceDate: "2026-09-30" })).resolves.toMatchObject({ replayed: false });
+  });
+});
+
+describe("crash recovery", () => {
+  const request = { requestId: "request-0801", vaultId: "test", operation: "create", route: "session", title: "Recovered", body: "Recovered body.", source: "test", sourceDate: "2026-09-30" };
+
+  async function crashedAfterNoteWrite() {
+    const f = await fixture();
+    const applied = await f.kernel.applyWrite(request);
+    // Simulate a crash between the note write and the final receipt: the receipt is still pending.
+    const receiptPath = join(f.config.stateDir, "requests/request-0801.json");
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const { appliedAt: _appliedAt, ...preview } = receipt.result;
+    await writeFile(receiptPath, JSON.stringify({ fingerprint: receipt.fingerprint, state: "pending", result: preview }), "utf8");
+    return { ...f, applied };
+  }
+
+  it("finishes a write whose note landed before the crash instead of failing on retry", async () => {
+    const { kernel, applied } = await crashedAfterNoteWrite();
+    await expect(kernel.applyWrite(request)).resolves.toMatchObject({ replayed: false, path: applied.path, afterSha256: applied.afterSha256 });
+    expect((await kernel.applyWrite(request)).replayed).toBe(true);
+  });
+
+  it("redoes a write whose note never landed", async () => {
+    const { kernel, vault, applied } = await crashedAfterNoteWrite();
+    await rm(join(vault, applied.path));
+    await expect(kernel.applyWrite(request)).resolves.toMatchObject({ replayed: false, afterSha256: applied.afterSha256 });
+    expect(await readFile(join(vault, applied.path), "utf8")).toContain("Recovered body.");
+  });
+
+  it("still replays receipts written before receipts had a state", async () => {
+    const { kernel, config } = await fixture();
+    const applied = await kernel.applyWrite({ ...request, requestId: "request-0802" });
+    const receiptPath = join(config.stateDir, "requests/request-0802.json");
+    const { state: _state, ...legacy } = JSON.parse(await readFile(receiptPath, "utf8"));
+    await writeFile(receiptPath, JSON.stringify(legacy), "utf8");
+    await expect(kernel.applyWrite({ ...request, requestId: "request-0802" })).resolves.toMatchObject({ replayed: true, appliedAt: applied.appliedAt });
+  });
+});
+
+describe("writer identity", () => {
+  it("records the client in the audit event when one is given", async () => {
+    const { kernel } = await fixture();
+    await kernel.applyWrite({ requestId: "request-0901", vaultId: "test", operation: "create", route: "session", title: "Who", body: "x", source: "test", sourceDate: "2026-09-30" }, { client: { id: "abc", name: "claude-code" } });
+    await kernel.applyWrite({ requestId: "request-0902", vaultId: "test", operation: "create", route: "session", title: "Anonymous", body: "x", source: "test", sourceDate: "2026-09-30" });
+    const [named, anonymous] = await kernel.recentAudit(2);
+    expect(named).toMatchObject({ client: { id: "abc", name: "claude-code" }, appliedAt: NOW.toISOString() });
+    expect(anonymous).not.toHaveProperty("client");
   });
 });
