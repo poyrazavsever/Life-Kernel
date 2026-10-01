@@ -37,6 +37,9 @@ const SYSTEM = [
   "Be warm and plain. Never shame the user about missed days or unfinished work."
 ].join("\n");
 
+/** Models that fail the request when `output_config.effort` is present. */
+const rejectsEffort = (model: string) => /haiku/i.test(model);
+
 export type BriefResult = { ok: true; text: string; model: string } | { ok: false; error: string };
 
 /**
@@ -50,7 +53,8 @@ export async function prepareBrief(create: CreateMessage, config: BriefsConfig, 
       max_tokens: 4000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      output_config: { effort: config.effort },
+      // Haiku 4.5 rejects the effort setting outright, so a cheaper model must not receive it.
+      ...(rejectsEffort(config.model) ? {} : { output_config: { effort: config.effort } }),
       system: SYSTEM,
       messages: [{ role: "user", content: `Ritual: ${ritual}\nWrite the brief in ${LANGUAGE[locale]}.\n\n<agenda>\n${JSON.stringify(agenda)}\n</agenda>` }]
     });
