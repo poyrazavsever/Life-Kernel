@@ -103,6 +103,7 @@ assets/brand             canonical visual identity assets
 - [Security model](docs/security-model.md)
 - [Skills](docs/skills.md)
 - [Brand guide](docs/brand.md)
+- [Roadmap](docs/roadmap.md)
 
 ## Principles
 

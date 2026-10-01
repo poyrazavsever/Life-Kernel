@@ -10,9 +10,11 @@ Current controls:
 - named write routes whose append targets stay inside the route folder;
 - preview/apply split;
 - per-route policy: `auto` applies directly, `review` needs `approved: true` on apply after the user has seen the preview (the default when a route sets no policy), and `deny` blocks the route entirely;
-- request-ID idempotency receipts;
-- expected SHA-256 on appends;
-- JSONL mutation audit;
+- request-ID idempotency receipts, written as pending before the note changes so a retry after a crash finishes the write instead of failing or duplicating it;
+- expected SHA-256 on appends and section updates, checked while holding a per-vault lock file in the state directory, so two agents in separate processes cannot both pass the check and overwrite each other (a lock older than 30 seconds is treated as left by a crashed process and taken over);
+- note replacements written to a temporary file and renamed into place, so a crash never leaves a half-written note;
+- JSONL mutation audit that names the writer: `client.id` is the authenticated client (OAuth client ID or `static-token`) and `client.name` is the name the client reported when it connected, which the client chooses and which is not verified;
+- frontmatter, including `ai_access`, is read the same way with LF, CRLF, or a byte-order mark, so a note saved by a Windows editor cannot slip past the access filter;
 - bearer authentication with constant-time comparison, OAuth access control with failed-login lockout, origin validation, host validation behind a proxy, request-size limit, and loopback default;
 - read-only connections: tokens without the write scope cannot preview or apply writes, over REST or MCP;
 - no delete, rename, shell, or arbitrary-path mutation.

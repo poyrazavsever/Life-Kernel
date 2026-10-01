@@ -9,6 +9,18 @@ Remote mode for ChatGPT and Claude.ai.
 - Remote mode guide, Docker config with a writable state volume, Caddy example. The container image was built and exercised; live ChatGPT and Claude.ai verification is still open and gates 0.1.0.
 - Fix: the audit log no longer copies note text.
 
+Hardening (roadmap phase 0).
+
+- Writes to one vault are serialized across processes with a lock file, so concurrent agents get a hash conflict instead of a lost update.
+- Receipts are written as pending before the note changes; a retry after a crash completes the write. Older receipts still replay.
+- Modified notes are replaced atomically through a temporary file.
+- Audit events for applied writes carry `client.id` (authenticated client) and `client.name` (reported by the client).
+- Fix: `validate` and the `ai_access` filter read frontmatter with CRLF line endings or a BOM; on Windows checkouts `validate` reported every note as missing its frontmatter.
+- Fix: `append` keeps the note's line endings.
+- Fix: slugs transliterate `ı`, `ß`, `ø`, and similar letters instead of dropping them, and a title with no Latin letters gets a slug from its `requestId`, so preview and apply produce the same path.
+- `.gitattributes` keeps text files LF in every checkout; CI runs on Linux, Windows, and macOS.
+- The server and health endpoint read their version from `package.json`. `LifeKernel` accepts an injected clock for tests.
+
 ## 0.1.0-alpha.0
 
 Local-first alpha: Claude Desktop, Claude Code, and Codex over stdio MCP. Remote HTTP still uses a shared bearer token; ChatGPT and Claude.ai need the OAuth work planned for 0.1.0.
