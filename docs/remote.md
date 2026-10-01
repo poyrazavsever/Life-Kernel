@@ -64,7 +64,8 @@ After connecting, say "Set up my Life Kernel vault." The agent loads the onboard
 
 - Serve only over HTTPS. The server refuses a non-HTTPS public URL except for localhost.
 - Redirect URIs must be `https`, or `http` on localhost. The consent page shows the redirect host so you can spot an unexpected client.
-- Anyone can register a client, but no client gets a token without the owner secret.
+- Anyone can register a client, but no client gets a token without the owner secret. Registration is capped at 100 clients. A client that never signed in can be dropped after an hour to make room; a client you connected is never dropped, and when nothing can be dropped the new registration is refused and audited. A flood of junk registrations therefore cannot disconnect ChatGPT or Claude.ai.
+- MCP sessions close after 30 idle minutes, and at most 100 stay open (the least recently used closes first). A client whose session ended gets a 404 and initializes a new one without you doing anything.
 - Tokens are bound to `https://<your host>/mcp`. Refresh tokens are stored only as hashes; access tokens live in memory, so a restart makes clients refresh.
 - Connector clients share your vault's `ai_access` rules. Notes marked `none` are never returned; `restricted` notes require an explicit request.
 - Content you discuss with ChatGPT or Claude goes to that provider. Life Kernel does not prevent that; it controls which notes the agent can fetch.

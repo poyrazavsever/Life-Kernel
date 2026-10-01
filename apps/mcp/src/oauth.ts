@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import type { Request, Response } from "express";
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
-import { InvalidClientMetadataError, InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InvalidClientMetadataError, InvalidGrantError, InvalidTokenError, TooManyRequestsError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthorizationParams, OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
@@ -33,6 +33,8 @@ interface Persisted { clients: Record<string, OAuthClientInformationFull>; refre
 const hash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const token = (prefix: string) => `${prefix}${randomBytes(32).toString("base64url")}`;
 const trimSlash = (value: string) => value.replace(/\/+$/, "");
+/** A registered client that never completed a sign-in becomes removable after this long. */
+const UNUSED_CLIENT_GRACE_SECONDS = 60 * 60;
 
 function secretMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(createHash("sha256").update(provided).digest(), createHash("sha256").update(expected).digest());
@@ -118,8 +120,19 @@ export class LifeKernelOAuth implements OAuthServerProvider {
         const state = await this.load();
         const ids = Object.keys(state.clients);
         if (ids.length >= this.maxClients) {
-          const oldest = ids.sort((a, b) => (state.clients[a]!.client_id_issued_at ?? 0) - (state.clients[b]!.client_id_issued_at ?? 0))[0]!;
-          delete state.clients[oldest];
+          // Registration is open to anyone, so a flood of throwaway clients must not push out one the owner
+          // actually connected. Only a client with no live refresh token that is also past its grace period
+          // can be dropped; when none qualifies, the new registration is refused instead.
+          const nowSeconds = Math.floor(this.now() / 1000);
+          const connected = new Set(Object.values(state.refresh).filter((record) => record.expiresAt > this.now()).map((record) => record.clientId));
+          const unused = ids
+            .filter((id) => !connected.has(id) && nowSeconds - (state.clients[id]!.client_id_issued_at ?? 0) >= UNUSED_CLIENT_GRACE_SECONDS)
+            .sort((a, b) => (state.clients[a]!.client_id_issued_at ?? 0) - (state.clients[b]!.client_id_issued_at ?? 0));
+          if (unused.length === 0) {
+            await this.audit("oauth_registration_refused", { reason: "client limit reached", clients: ids.length });
+            throw new TooManyRequestsError("Too many registered clients; try again later.");
+          }
+          delete state.clients[unused[0]!];
         }
         const client = { ...metadata, client_id: randomBytes(16).toString("hex"), client_id_issued_at: Math.floor(this.now() / 1000) } as OAuthClientInformationFull;
         state.clients[client.client_id] = client;
