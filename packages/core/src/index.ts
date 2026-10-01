@@ -5,6 +5,7 @@ import { parseEnv } from "node:util";
 import { z } from "zod";
 import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
+import { type VaultGrants } from "./access.js";
 import { buildAgenda } from "./agenda.js";
 import { replaceFile, withFileLock } from "./files.js";
 import { ritualCalendar } from "./ics.js";
@@ -18,6 +19,7 @@ export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
 export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
+export { createAgentToken, findAgentToken, grantScopes, grantsFromScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, type AgentToken, type VaultGrants } from "./access.js";
 export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
 export { actionLink, actionSecret, verifyAction, NUDGE_ACTIONS, type NudgeAction } from "./actions.js";
 export { pollTelegram, telegramChats } from "./telegram.js";
@@ -354,6 +356,17 @@ export class LifeKernel {
 
   private today(): string {
     return localDate(this.config.timezone, this.now());
+  }
+
+  /**
+   * A view of this kernel that sees only the granted vaults; vaults granted for reading only become read-only.
+   * Every method then behaves as if the other vaults did not exist. State, locks, and the clock are shared.
+   */
+  restrictTo(grants: VaultGrants): LifeKernel {
+    const vaults = this.config.vaults
+      .filter((vault) => grants.read.includes(vault.id) || grants.write.includes(vault.id))
+      .map((vault) => grants.write.includes(vault.id) ? vault : { ...vault, mode: "read-only" as const });
+    return new LifeKernel({ ...this.config, vaults }, { now: this.now });
   }
 
   private vault(id: string): VaultConfig {
