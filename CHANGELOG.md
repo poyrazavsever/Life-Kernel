@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+Stabilization (roadmap phase 7).
+
+- Fix: on Turkish Windows the generated Task Scheduler wrapper could not run from a path with a letter such as `ı` (the console used code page 857, the file is UTF-8), so reminders silently never ran. The wrapper now switches to UTF-8 first.
+- Fix: `lifekernel rituals`, `agenda`, `read`, and `list` take an optional vault ID like `today` and `capture` do.
+- Fix: the Docker image runs as a non-root user, includes `git` (so `"history": "git"` and `undo` work in a container), reports health, and keeps its state volume writable for any user ID. `scripts/docker-smoke.sh` checks all of this.
+- Fix: MCP sessions expire after 30 idle minutes and are capped at 100; an unknown session ID gets a 404 so clients initialize again. A flood of OAuth client registrations can no longer push out a client you connected.
+- Fix: write locks. A stale lock is removed under a takeover lock so two processes cannot both take it, a slow holder renews its lock, a holder never deletes a lock another process owns, and Windows `EPERM` while a lock is being deleted counts as contention.
+- Fix: `undo` matches the exact request ID (`history-1` no longer finds the commit for `history-12`); `notify-send` ends option parsing before the message.
+- Fix: briefs no longer send the `effort` setting to Haiku, which rejects it.
+- The Anthropic SDK and nodemailer load on first use; loading the core dropped from 227 ms to 76 ms.
+- Tests: onboarding, inbox triage, the weekly review, vault-limited connections, and hostile note text now run end to end through an MCP client. ESLint, `npm audit`, coverage, Dependabot, and a Docker smoke test run in CI.
+
+## 0.2.0-beta.0 (2026-10-01)
+
+Everything built since 0.1.0-alpha.0, in roadmap phases 0 to 6. 0.1.0 is withheld until ChatGPT and Claude.ai have been verified against a live account; the OAuth flow itself is covered by automated tests.
+
 Insights (roadmap phase 6).
 
 - `insights_period`, `POST /v1/insights`, and `lifekernel insights`: energy and its weekday pattern, focus hours against stated capacity, morning plan and circle consistency, completed and overdue tasks, and open tasks planned on three or more days, with plain observations that cite their numbers and dates. Review agendas include them, and the review skills start from them.
@@ -58,8 +74,6 @@ Planning data (roadmap phase 1).
 - `vault_list` reports each route's period and writable fields.
 - Starter layout 3: daily template fields `energy`, `focus_hours`, `morning_plan`, `circle`, `circle_at`, and a tasks convention in the vault's `AGENTS.md`. `lifekernel migrate <vaultId> [--apply]` updates older vaults. New CLI commands `list` and `tasks`.
 - Skills use the new tools: the daily circle records energy and marks itself done, the weekly review reads the week's fields and overdue tasks, and decisions are accepted with `set_frontmatter`.
-
-## 0.1.0 (in progress)
 
 Remote mode for ChatGPT and Claude.ai.
 
