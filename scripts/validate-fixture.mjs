@@ -65,7 +65,7 @@ try {
   const quiet = run("tick", "--dry-run");
   if (quiet.enabled !== false) throw new Error(`tick should be off without a notifications section: ${JSON.stringify(quiet)}`);
   const plan = run("schedule", "install", "--dry-run", "--config", join(work, "lifekernel.config.json"));
-  if (!plan.dryRun || plan.files.length === 0 || !plan.files.some((file) => file.content.includes(" tick") || file.content.includes("\"tick\""))) throw new Error(`schedule dry run looks wrong: ${JSON.stringify(plan)}`);
+  if (!plan.dryRun || plan.files.length === 0 || !plan.files.some((file) => /(^|[\s"'>])tick([\s"'<]|$)/m.test(file.content))) throw new Error(`schedule dry run looks wrong: ${JSON.stringify(plan)}`);
   const calendar = execFileSync(process.execPath, [cli, "ics", "personal"], { cwd: work, encoding: "utf8", env: { ...process.env, INIT_CWD: work, LIFEKERNEL_CONFIG: join(work, "lifekernel.config.json") } });
   if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
   const today = run("today", "--json");
