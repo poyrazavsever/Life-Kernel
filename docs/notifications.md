@@ -135,9 +135,22 @@ Your rhythm can also appear as recurring events in Google Calendar, Apple Calend
 - **One-time import:** `npm run cli -- ics > rituals.ics`, then import the file.
 - **Subscription (remote mode):** set `LIFEKERNEL_CALENDAR_TOKEN` to a random value of 24 or more characters that differs from your API token, and subscribe to `https://<your host>/v1/rituals.ics?token=<that value>`. The feed contains ritual names and times only, and its token cannot read or write notes.
 
+## Prepared briefs (optional, off by default)
+
+Life Kernel itself never calls an AI model unless you turn this on. With briefs enabled, a reminder for a listed ritual is written by Claude from that ritual's agenda: a few plain lines about what was planned, what is due, and one question to decide.
+
+```json
+"briefs": { "enabled": true, "rituals": ["morning-plan"], "model": "claude-opus-5-5", "effort": "low", "apiKeyEnv": "ANTHROPIC_API_KEY" }
+```
+
+Put your Claude API key in `.env` as `ANTHROPIC_API_KEY`, or rely on an `ant auth login` profile. Briefs appear only on channels with `content: "agenda"`; other channels keep the fixed text. Preview one with `npm run cli -- brief morning-plan`.
+
+What this sends: the ritual's agenda, which is built only from notes with `ai_access: context`, without hashes. It goes to the Claude API under your account. The model is told to treat the agenda as data and never follow instructions inside it. If the model declines, returns nothing, or cannot be reached, the reminder goes out with its usual text. The audit log records whether a brief was written, never its text, and nothing is written to the vault.
+
 ## What is sent where
 
 - With `content: "minimal"` (the default), a message contains the ritual's name and a fixed sentence. Nothing from your notes leaves the machine.
 - With `content: "agenda"`, it adds counts (tasks due, days recorded, goals without a project) and one focus line from your plan, at most 80 characters. That text goes to the channel's provider, for example ntfy.sh. Use it only with a channel you trust, such as a self-hosted ntfy server.
-- Notes marked `restricted` or `none` never contribute to any message.
+- With briefs enabled, the ritual's agenda also goes to the Claude API (see above).
+- Notes marked `restricted` or `none` never contribute to any message or brief.
 - The audit log records each reminder's ritual, channels, and outcome, never its text.

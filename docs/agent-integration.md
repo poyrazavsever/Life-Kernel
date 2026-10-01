@@ -85,6 +85,10 @@ A route with `period` (`day`, `week`, `month`, or `quarter`) keeps one note per 
 | `monthly-review` | totals for the month, active goals with the number of linked active projects, and the month's weekly reviews |
 | `quarterly-review` | totals for the quarter, goals, the quarter's monthly reviews, and active areas |
 
+## Insights
+
+`insights_period` (MCP), `POST /v1/insights`, or `lifekernel insights [week|month|quarter] [date]` returns deterministic numbers for the period containing a date, counting only days up to today: energy (average, lowest days, weekday pattern, first versus second half), focus hours against stated capacity in `schedule/Capacity.md`, morning plan and circle consistency with missing dates, completed and overdue tasks, and open tasks named in the day's plan on three or more days. `observations` states the supported findings in plain sentences with their numbers and dates; nothing is stated on fewer than three samples. Review agendas include the insights for their period.
+
 ## Session context
 
 `context_bundle` (MCP) or `POST /v1/context` returns the minimum context for a session in one call: the vault's bundle notes, today's daily note, and the most recent earlier daily notes, within `maxChars` (default 24000). Notes that are missing, `restricted` (unless requested), `none`, or over budget are listed under `skipped` with a reason. Each note carries the hash of the full note, so a truncated read can still be followed by a safe write. When the bundle is for today, it also carries `rituals`, the same report `ritual_status` returns.

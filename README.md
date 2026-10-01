@@ -80,6 +80,7 @@ The HTTP server exposes `/mcp` and a small REST surface under `/v1`. Continue wi
 - look up the single daily, weekly, monthly, or quarterly note for a date;
 - list notes by type, status, or area, and collect open tasks by due date;
 - see which rituals (morning plan, daily circle, weekly, monthly, and quarterly reviews) are due, and get each one's agenda;
+- measure a week, month, or quarter: energy patterns, focus against capacity, ritual consistency, and tasks carried day after day;
 - preview a routed create, append, section update, or frontmatter change;
 - apply the exact request idempotently;
 - validate required frontmatter and inspect recent audit events.

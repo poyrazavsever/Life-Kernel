@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+Insights (roadmap phase 6).
+
+- `insights_period`, `POST /v1/insights`, and `lifekernel insights`: energy and its weekday pattern, focus hours against stated capacity, morning plan and circle consistency, completed and overdue tasks, and open tasks planned on three or more days, with plain observations that cite their numbers and dates. Review agendas include them, and the review skills start from them.
+- Prepared briefs, off by default: with `notifications.briefs.enabled`, reminders on agenda channels carry a short brief written by Claude from the ritual's agenda, using the owner's API credentials and server-side fallbacks. `lifekernel brief` previews one.
+
 Central hub (roadmap phase 5).
 
 - `lifekernel init --template personal|startup|work [--id]` creates startup and work vaults and adds them to an existing config with their routes.

@@ -29,7 +29,7 @@ flowchart LR
 | 3. Notifications | 0.3.0 | Reminders reach the user on their desktop, phone, or calendar, with a link that starts the ritual | L |
 | 4. Capture and replies | 0.4.0 | The user can capture a thought or snooze a ritual from a notification | M |
 | 5. Central hub | 0.5.0 | Personal, startup, and work vaults with per-agent scopes, identity, and undo | L |
-| 6. Insights | later | Trends and optional prepared briefs drawn from the evidence | M |
+| 6. Insights | 0.6.0 | Trends and optional prepared briefs drawn from the evidence | M |
 
 Phases 1 and 5 can run in parallel. Phase 3 depends on Phase 2, because a reminder is only as good as the ritual state behind it.
 
@@ -329,9 +329,11 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 
 ---
 
-## Phase 6: Insights (later)
+## Phase 6: Insights (0.6.0)
 
 **Goal:** turn the evidence into honest, checkable patterns.
+
+**Status:** done, apart from the Obsidian companion plugin, which is a separate project that cannot be tested here and is left for later. The open decision is settled: Life Kernel calls a model only when the owner turns briefs on, with the owner's own credentials, and stays model-free otherwise. "Tasks carried over" is measured as open tasks named in the day's plan on three or more days, since due-date changes are not recorded.
 
 - **`insights_period({ period })`:** deterministic numbers with source dates. Covers average energy, focus hours versus stated capacity, completion rate of morning plans, ritual consistency, and tasks carried over three or more times.
 - **Weekly review uses it:** the "Quote dates, not impressions" rule becomes measurable.
@@ -354,4 +356,4 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 
 ## Open decisions
 
-1. **Prepared briefs in Phase 6:** whether Life Kernel should ever call a model itself, or stay model-free.
+None at the moment.

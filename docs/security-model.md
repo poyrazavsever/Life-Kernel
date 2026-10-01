@@ -29,6 +29,8 @@ Current controls:
 - named agent tokens are stored only as SHA-256 hashes in the state directory, compared in constant time, and revocable one by one; their writes appear in the audit log as `token:<name>`;
 - rollup routes accept only short, linked outcomes (at most 600 characters, a link to the source, no later edits), so a project agent cannot copy detailed project history into the personal vault;
 - git history: commits name the request, route, source, and client but never note text, and only the written path is committed; `undo` is an owner CLI action that refuses when the note changed after the write or when the write was a create, and is audited;
+- insights are computed locally from notes the agent may read and report counts and dates, not note text, apart from the titles of tasks planned repeatedly;
+- prepared briefs are off by default; when enabled, a ritual's agenda (from `context` notes only, hashes removed) is sent to the Claude API with the owner's credentials, framed as data the model must not take instructions from; failures fall back to the fixed reminder, briefs are never written to the vault, and the audit log records only whether one was written;
 - the calendar feed uses its own token, which must differ from the API token and grants only ritual names and times; because calendar apps cannot send headers, it travels in the URL, so treat the feed URL as a secret and rotate the token if it leaks;
 - no delete, rename, shell, or arbitrary-path mutation. `lifekernel migrate` edits templates and the vault marker outside any route, but only from the owner's CLI; it is not an agent tool, and it is audited.
 
