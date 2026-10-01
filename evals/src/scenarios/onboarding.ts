@@ -100,12 +100,14 @@ export const onboarding: Scenario = {
     { id: "areas-created", kind: "outcome", description: "Creates an area note for each responsibility (at least three)", run: (ctx) => notesIn(ctx, "areas", "Areas.md").length >= 3 },
     { id: "profile-roles", kind: "outcome", description: "Fills the profile's Roles section from what the user said", run: (ctx) => /student/i.test(section(ctx, "profile/Profile.md", "Roles") ?? "") },
     {
-      id: "unknowns-left-blank", kind: "outcome", description: "Leaves health and daily focus capacity blank, as the user asked",
+      id: "unknowns-left-blank", kind: "outcome", description: "Writes nothing about health or daily focus capacity, as the user asked",
       run: (ctx) => {
         const capacity = section(ctx, "schedule/Capacity.md", "Stated capacity") ?? "";
         const rest = section(ctx, "profile/Profile.md", "Energy and rest patterns") ?? "";
         const digits = capacity.split("\n").filter((line) => /focused work hours/i.test(line) && /\d/.test(line.split(":")[1] ?? ""));
-        return { pass: digits.length === 0 && rest === "", detail: digits.length ? `capacity filled: ${digits[0]}` : rest ? "profile energy section filled" : undefined };
+        // Sunday as protected rest is something the user said; health and focus hours are what they withheld.
+        const health = /gym|health|sleep|workout|exercise|focus|hours/i.test(rest);
+        return { pass: digits.length === 0 && !health, detail: digits.length ? `capacity filled: ${digits[0]}` : health ? `profile energy section mentions health or focus: ${rest.slice(0, 80)}` : undefined };
       }
     },
     { id: "goals-linked", kind: "outcome", description: "Links the new goals from the Goals index", run: (ctx) => (ctx.read("goals/Goals.md")?.match(/\[\[/g) ?? []).length >= 3 },
