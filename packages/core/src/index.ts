@@ -3,6 +3,17 @@ import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
+import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
+import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
+
+export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
+export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
+export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
+
+/** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
+export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
+const FIELD_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
 const RouteSchema = z.object({
   folder: z.string().min(1),
@@ -10,10 +21,15 @@ const RouteSchema = z.object({
   status: z.string().min(1),
   area: z.string().min(1),
   moc: z.string().optional(),
-  policy: z.enum(["auto", "review", "deny"]).default("review")
+  policy: z.enum(["auto", "review", "deny"]).default("review"),
+  /** One note per period, named by its period key. Routes of type `daily` default to `day`. */
+  period: z.enum(PERIODS).optional(),
+  /** Frontmatter keys that `create` and `set_frontmatter` may set on this route (default none). */
+  fields: z.array(z.string().regex(FIELD_NAME).refine((key) => !(PROTECTED_FIELDS as readonly string[]).includes(key), (key) => ({ message: `${key} is a protected field and cannot be writable.` }))).optional()
 });
 
 export type RoutePolicy = z.infer<typeof RouteSchema>["policy"];
+export type RouteConfig = z.infer<typeof RouteSchema>;
 
 const VaultSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-_]*$/),
@@ -21,7 +37,9 @@ const VaultSchema = z.object({
   path: z.string().min(1),
   mode: z.enum(["read-only", "read-write"]),
   routes: z.record(RouteSchema).default({}),
-  bundle: z.array(z.string().min(1)).optional()
+  bundle: z.array(z.string().min(1)).optional(),
+  /** Folders that search, listing, and task queries skip (default `_templates`). Validation still checks them. */
+  ignore: z.array(z.string().min(1)).optional()
 });
 
 function isValidTimeZone(value: string): boolean {
@@ -35,13 +53,23 @@ const ConfigSchema = z.object({
   vaults: z.array(VaultSchema).min(1)
 });
 
+function FieldValueSchema() {
+  const text = z.string().max(500).refine((value) => !/[\r\n]/.test(value), "Frontmatter values must be a single line.");
+  const scalar = z.union([text, z.number().finite()]);
+  return z.union([scalar, z.boolean(), z.null(), z.array(scalar).max(50)]);
+}
+
 export const WriteRequestSchema = z.object({
   requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/, "requestId must be 8-128 characters: letters, digits, dot, underscore, or hyphen."),
   vaultId: z.string().min(1),
-  operation: z.enum(["create", "append", "update_section"]),
+  operation: z.enum(["create", "append", "update_section", "set_frontmatter"]),
   route: z.string().min(1),
-  title: z.string().min(1).max(180),
-  body: z.string().min(1),
+  /** Required for create; ignored by the other operations. */
+  title: z.string().min(1).max(180).optional(),
+  /** Required for create, append, and update_section; not accepted for set_frontmatter. */
+  body: z.string().min(1).optional(),
+  /** Frontmatter to set on create or set_frontmatter; null removes a key. Keys must be in the route's `fields`. */
+  fields: z.record(z.string().regex(FIELD_NAME), FieldValueSchema()).optional(),
   targetPath: z.string().optional(),
   section: z.string().trim().min(1).max(180).optional(),
   expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -85,6 +113,10 @@ export interface KernelOptions {
 }
 
 interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: PreviewResult & { appliedAt?: string } }
+
+/** Starter vault layout this release writes and migrates to. */
+export const LAYOUT_VERSION = 3;
+const DAILY_TEMPLATE_FIELDS: Record<string, FieldValue> = { energy: "", focus_hours: "", morning_plan: "", circle: "", circle_at: "" };
 
 const LOCK_TIMEOUT_MS = 10_000;
 const LOCK_STALE_MS = 30_000;
@@ -141,10 +173,34 @@ function yamlValue(value: string): string {
 }
 
 type AiAccess = "context" | "restricted" | "none";
+const AI_ACCESS = ["context", "restricted", "none"];
 
+/** A note's ai_access. An unrecognized value counts as restricted, so a typo never widens access. */
 function aiAccessFor(content: string): AiAccess | null {
-  const match = frontmatterBlock(content).match(/^ai_access:\s*["']?(context|restricted|none)["']?\s*$/m);
-  return (match?.[1] as AiAccess | undefined) ?? null;
+  const data = readFrontmatter(content);
+  if (data) {
+    const value = data.ai_access;
+    if (value === undefined || value === null || value === "") return null;
+    return AI_ACCESS.includes(String(value)) ? value as AiAccess : "restricted";
+  }
+  // Frontmatter that is not valid YAML still honors a recognizable ai_access line.
+  const match = frontmatterBlock(content).match(/^ai_access:\s*["']?([A-Za-z]+)["']?\s*(?:#.*)?$/m);
+  if (!match) return null;
+  return AI_ACCESS.includes(match[1]!) ? match[1] as AiAccess : "restricted";
+}
+
+/** Fold case and accents for matching, so "istanbul" finds "İstanbul" and "calisma" finds "Çalışma". */
+function fold(value: string): string {
+  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/ı/g, "i");
+}
+
+function noteTitle(content: string, path: string): string {
+  return content.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] ?? basename(path, extname(path));
+}
+
+/** The period of a route, if it keeps one note per period. Older configs mark daily notes only by type. */
+function routePeriod(route: RouteConfig): Period | undefined {
+  return route.period ?? (route.type === "daily" ? "day" : undefined);
 }
 
 function assertReadable(content: string, includeRestricted: boolean): void {
@@ -157,23 +213,6 @@ function isInside(root: string, candidate: string): boolean {
   const resolvedRoot = resolve(root);
   const resolvedCandidate = resolve(candidate);
   return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`);
-}
-
-function detectEol(content: string): string {
-  return content.includes("\r\n") ? "\r\n" : "\n";
-}
-
-function frontmatterEnd(lines: string[]): number {
-  if (lines[0]?.trim() !== "---") return 0;
-  for (let index = 1; index < lines.length; index += 1) if (lines[index]!.trim() === "---") return index + 1;
-  return 0;
-}
-
-/** The YAML lines between the opening and closing `---`, or "" when the note has none. Accepts LF, CRLF, and a BOM. */
-function frontmatterBlock(content: string): string {
-  const lines = content.split(/\r?\n/);
-  const end = frontmatterEnd(lines);
-  return end ? lines.slice(1, end - 1).join("\n") : "";
 }
 
 async function readReceipt(path: string): Promise<Receipt | null> {
@@ -294,7 +333,7 @@ export class LifeKernel {
   listVaults() {
     return this.config.vaults.map(({ id, kind, mode, routes }) => ({
       id, kind, mode,
-      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy }))
+      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy, ...(routePeriod(route) ? { period: routePeriod(route) } : {}), fields: route.fields ?? [] }))
     }));
   }
 
@@ -316,29 +355,43 @@ export class LifeKernel {
     return { vaultId, path: relative(vault.path, absolute).replaceAll("\\", "/"), content, sha256: sha256(content) };
   }
 
-  async search(query: string, vaultId?: string, limit = 20, includeRestricted = false): Promise<SearchHit[]> {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) throw new Error("Search query cannot be empty.");
+  /** Markdown notes in a vault, minus its ignored folders, with vault-relative paths. */
+  private async notes(vault: VaultConfig): Promise<Array<{ file: string; path: string }>> {
+    const ignored = (vault.ignore ?? ["_templates"]).map((folder) => `${folder.replace(/^\/+|\/+$/g, "")}/`);
+    return (await markdownFiles(vault.path))
+      .map((file) => ({ file, path: relative(vault.path, file).replaceAll("\\", "/") }))
+      .filter(({ path }) => !ignored.some((prefix) => path.startsWith(prefix)));
+  }
+
+  /**
+   * Find lines in notes that contain every search term somewhere in the note, in any order.
+   * Matching ignores case and accents. `type` and `status` filter by frontmatter.
+   */
+  async search(query: string, vaultId?: string, limit = 20, includeRestricted = false, filter: { type?: string; status?: string } = {}): Promise<SearchHit[]> {
+    const terms = [...new Set(fold(query).split(/\s+/).filter(Boolean))];
+    if (terms.length === 0) throw new Error("Search query cannot be empty.");
     const vaults = vaultId ? [this.vault(vaultId)] : this.config.vaults;
     const hits: SearchHit[] = [];
     for (const vault of vaults) {
-      for (const file of await markdownFiles(vault.path)) {
+      for (const { file, path } of await this.notes(vault)) {
         const content = await readFile(file, "utf8");
         const access = aiAccessFor(content);
         if (access === "none" || (access === "restricted" && !includeRestricted)) continue;
+        if (filter.type || filter.status) {
+          const data = readFrontmatter(content) ?? {};
+          if ((filter.type && data.type !== filter.type) || (filter.status && data.status !== filter.status)) continue;
+        }
+        const folded = fold(content);
+        if (!terms.every((term) => folded.includes(term))) continue;
         const lines = content.split(/\r?\n/);
+        const hash = sha256(content);
         lines.forEach((line, index) => {
-          if (hits.length >= limit || !line.toLocaleLowerCase().includes(needle)) return;
+          if (hits.length >= limit) return;
+          const foldedLine = fold(line);
+          if (!terms.some((term) => foldedLine.includes(term))) return;
           const start = Math.max(0, index - 1);
           const end = Math.min(lines.length, index + 2);
-          hits.push({
-            vaultId: vault.id,
-            path: relative(vault.path, file).replaceAll("\\", "/"),
-            lineStart: start + 1,
-            lineEnd: end,
-            excerpt: lines.slice(start, end).join("\n"),
-            sha256: sha256(content)
-          });
+          hits.push({ vaultId: vault.id, path, lineStart: start + 1, lineEnd: end, excerpt: lines.slice(start, end).join("\n"), sha256: hash });
         });
         if (hits.length >= limit) return hits;
       }
@@ -346,23 +399,97 @@ export class LifeKernel {
     return hits;
   }
 
-  /** Look up the single daily note for a date (default: today in the configured time zone). */
-  async dailyNote(vaultId: string, date?: string, routeName?: string) {
+  /**
+   * Look up the single note for the period containing a date (default: today in the configured time zone)
+   * on a route that keeps one note per period. Pass `route`, or `period` when only one route has it.
+   */
+  async periodNote(vaultId: string, options: { route?: string; period?: Period; date?: string } = {}) {
     const vault = this.vault(vaultId);
-    const day = date ?? this.today();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("date must be YYYY-MM-DD.");
-    const candidates = Object.entries(vault.routes).filter(([name, route]) => route.type === "daily" && (!routeName || name === routeName));
-    if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no daily route${routeName ? ` named ${routeName}` : ""}.`);
-    if (candidates.length > 1) throw new Error("Several daily routes exist; pass routeName.");
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    const candidates = Object.entries(vault.routes).filter(([name, route]) => routePeriod(route) && (!options.route || name === options.route) && (!options.period || routePeriod(route) === options.period));
+    const described = options.period === "day" ? "daily" : options.period ? `${options.period}ly` : "periodic";
+    if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no ${described} route${options.route ? ` named ${options.route}` : ""}.`);
+    if (candidates.length > 1) throw new Error(`Several ${described} routes exist; pass route.`);
     const [name, route] = candidates[0]!;
-    const path = `${route.folder}/${day}.md`;
+    const period = routePeriod(route)!;
+    const key = periodKey(period, date);
+    const base = { vaultId: vault.id, date, route: name, policy: route.policy, period, key, ...periodRange(period, date), path: `${route.folder}/${key}.md` };
     try {
-      const note = await this.readNote(vault.id, path);
-      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: true as const, path: note.path, content: note.content, sha256: note.sha256 };
+      const note = await this.readNote(vault.id, base.path);
+      return { ...base, exists: true as const, path: note.path, content: note.content, sha256: note.sha256 };
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return { vaultId: vault.id, date: day, route: name, policy: route.policy, exists: false as const, path };
+      return { ...base, exists: false as const };
     }
+  }
+
+  /** Look up the single daily note for a date (default: today in the configured time zone). */
+  async dailyNote(vaultId: string, date?: string, routeName?: string) {
+    return this.periodNote(vaultId, { period: "day", ...(date ? { date } : {}), ...(routeName ? { route: routeName } : {}) });
+  }
+
+  /** List notes by frontmatter. Notes without the filtered value are left out. */
+  async listNotes(vaultId: string, filter: { type?: string; status?: string; area?: string; folder?: string; updatedBefore?: string; updatedAfter?: string; includeRestricted?: boolean; limit?: number } = {}) {
+    const vault = this.vault(vaultId);
+    const limit = Math.min(Math.max(filter.limit ?? 50, 1), 200);
+    const folder = filter.folder ? `${filter.folder.replace(/^\/+|\/+$/g, "")}/` : undefined;
+    const notes: Array<{ path: string; title: string; frontmatter: Record<string, unknown>; sha256: string }> = [];
+    for (const { file, path } of await this.notes(vault)) {
+      if (folder && !path.startsWith(folder)) continue;
+      const content = await readFile(file, "utf8");
+      const access = aiAccessFor(content);
+      if (access === "none" || (access === "restricted" && !filter.includeRestricted)) continue;
+      const data = readFrontmatter(content) ?? {};
+      if (filter.type && data.type !== filter.type) continue;
+      if (filter.status && data.status !== filter.status) continue;
+      if (filter.area && data.area !== filter.area) continue;
+      const updated = typeof data.updated === "string" ? data.updated : "";
+      if (filter.updatedBefore && !(updated && updated < filter.updatedBefore)) continue;
+      if (filter.updatedAfter && !(updated && updated > filter.updatedAfter)) continue;
+      notes.push({ path, title: noteTitle(content, path), frontmatter: data, sha256: sha256(content) });
+      if (notes.length >= limit) break;
+    }
+    return notes;
+  }
+
+  /**
+   * Open checklist items in Obsidian Tasks format, ordered by due date, then priority.
+   * `dueBy` keeps tasks due on or before a date; undated tasks are kept unless `includeUndated` is false.
+   */
+  async openTasks(filter: { vaultId?: string; path?: string; type?: string; area?: string; dueBy?: string; includeUndated?: boolean; includeRestricted?: boolean; limit?: number } = {}) {
+    if (filter.path && !filter.vaultId) throw new Error("path requires vaultId.");
+    const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+    const vaults = filter.vaultId ? [this.vault(filter.vaultId)] : this.config.vaults;
+    const found: Array<Task & { vaultId: string; path: string; sha256: string }> = [];
+    for (const vault of vaults) {
+      const files = filter.path
+        ? [{ file: resolveMarkdownPath(vault.path, filter.path), path: relative(vault.path, resolveMarkdownPath(vault.path, filter.path)).replaceAll("\\", "/") }]
+        : await this.notes(vault);
+      for (const { file, path } of files) {
+        const content = await readFile(file, "utf8");
+        const access = aiAccessFor(content);
+        if (access === "none" || (access === "restricted" && !filter.includeRestricted)) {
+          if (filter.path) assertReadable(content, filter.includeRestricted ?? false);
+          continue;
+        }
+        if (filter.type || filter.area) {
+          const data = readFrontmatter(content) ?? {};
+          if ((filter.type && data.type !== filter.type) || (filter.area && data.area !== filter.area)) continue;
+        }
+        const hash = sha256(content);
+        for (const task of parseTasks(content)) {
+          if (task.status === "done" || task.status === "cancelled") continue;
+          if (filter.dueBy && (task.due ? task.due > filter.dueBy : filter.includeUndated === false)) continue;
+          if (!filter.dueBy && filter.includeUndated === false && !task.due) continue;
+          found.push({ vaultId: vault.id, path, sha256: hash, ...task });
+        }
+      }
+    }
+    found.sort((a, b) => (a.due ?? "9999").localeCompare(b.due ?? "9999")
+      || PRIORITY_RANK[a.priority ?? "none"] - PRIORITY_RANK[b.priority ?? "none"]
+      || a.path.localeCompare(b.path) || a.line - b.line);
+    return found.slice(0, limit);
   }
 
   /**
@@ -378,7 +505,7 @@ export class LifeKernel {
     let remaining = Math.min(Math.max(options.maxChars ?? 24000, 1000), 200000);
     const paths = [...(vault.bundle ?? DEFAULT_BUNDLE)];
 
-    const dailyRoute = Object.values(vault.routes).find((route) => route.type === "daily");
+    const dailyRoute = Object.values(vault.routes).find((route) => routePeriod(route) === "day");
     if (dailyRoute) {
       let names: string[] = [];
       try { names = await readdir(resolve(vault.path, dailyRoute.folder)); } catch (error: unknown) {
@@ -443,11 +570,21 @@ export class LifeKernel {
     if (!route) throw new Error(`Route ${request.route} is not allowed for vault ${vault.id}.`);
     if (route.policy === "deny") throw new Error(`Route ${request.route} is denied by policy.`);
 
+    const { operation } = request;
+    if (operation === "create" && !request.title) throw new Error("title is required for create operations.");
+    if (operation === "set_frontmatter" && request.body !== undefined) throw new Error("body is not accepted for set_frontmatter operations; pass fields.");
+    if (operation !== "set_frontmatter" && request.body === undefined) throw new Error(`body is required for ${operation} operations.`);
+    if (operation === "set_frontmatter" && Object.keys(request.fields ?? {}).length === 0) throw new Error("fields is required for set_frontmatter operations.");
+    if (request.fields && operation !== "create" && operation !== "set_frontmatter") throw new Error("fields is only accepted for create and set_frontmatter operations.");
+    const blocked = Object.keys(request.fields ?? {}).filter((key) => !(route.fields ?? []).includes(key));
+    if (blocked.length > 0) throw new Error(`Route ${request.route} does not allow setting ${blocked.join(", ")}. Writable fields: ${(route.fields ?? []).join(", ") || "none"}.`);
+
     let path: string;
-    if (request.operation === "create") {
-      path = route.type === "daily"
-        ? `${route.folder}/${request.sourceDate}.md`
-        : `${route.folder}/${request.sourceDate}-${slugify(request.title, `note-${request.requestId}`)}.md`;
+    if (operation === "create") {
+      const period = routePeriod(route);
+      path = period
+        ? `${route.folder}/${periodKey(period, request.sourceDate)}.md`
+        : `${route.folder}/${request.sourceDate}-${slugify(request.title!, `note-${request.requestId}`)}.md`;
       if (request.targetPath) throw new Error("targetPath is not accepted for create operations.");
     } else {
       if (!request.targetPath) throw new Error(`targetPath is required for ${request.operation} operations.`);
@@ -474,7 +611,8 @@ export class LifeKernel {
     if (request.expectedSha256 && sha256(before) !== request.expectedSha256) throw new Error("Target note changed after it was read; refresh and preview again.");
 
     const now = this.today();
-    const created = [
+    const body = request.body?.trim() ?? "";
+    const createdNote = () => [
       "---",
       `id: ${yamlValue(stableNoteId(vault.id, request.requestId))}`,
       `type: ${yamlValue(route.type)}`,
@@ -491,20 +629,22 @@ export class LifeKernel {
       "",
       `# ${request.title}`,
       "",
-      request.body.trim(),
+      body,
       ""
     ].join("\n");
     let after: string;
     let shown = "";
-    if (request.operation === "create") after = created;
-    else if (request.operation === "append") {
+    if (operation === "create") after = request.fields ? setFrontmatter(createdNote(), request.fields) : createdNote();
+    else if (operation === "append") {
       const eol = detectEol(before);
-      after = bumpUpdated(`${before.trimEnd()}${eol}${eol}${request.body.trim().split(/\r?\n/).join(eol)}${eol}`, now);
-    }
-    else {
-      const replaced = replaceSection(before, request.section!, request.body);
+      after = bumpUpdated(`${before.trimEnd()}${eol}${eol}${body.split(/\r?\n/).join(eol)}${eol}`, now);
+    } else if (operation === "update_section") {
+      const replaced = replaceSection(before, request.section!, body);
       after = bumpUpdated(replaced.content, now);
       shown = replaced.section;
+    } else {
+      after = bumpUpdated(setFrontmatter(before, request.fields!), now);
+      shown = `---\n${frontmatterBlock(after)}\n---`;
     }
     const canonicalPath = relative(vault.path, absolute).replaceAll("\\", "/");
     const result: PreviewResult = {
@@ -612,6 +752,52 @@ export class LifeKernel {
       }
     }
     return { ok: issues.length === 0, notes, issues };
+  }
+
+  /**
+   * Bring a vault made by `lifekernel init` up to the current layout. Without `apply` it only reports
+   * the changes. This is an owner action for the CLI, not an agent tool: it edits templates and the
+   * vault marker, which no route covers.
+   */
+  async migrate(vaultId: string, options: { apply?: boolean } = {}) {
+    const vault = this.vault(vaultId);
+    if (options.apply && vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
+    const plan = async () => {
+      const markerPath = join(vault.path, ".lifekernel", "vault.json");
+      let marker: { layoutVersion?: number };
+      try { marker = JSON.parse(await readFile(markerPath, "utf8")) as { layoutVersion?: number }; } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        throw new Error(`Vault ${vault.id} has no .lifekernel/vault.json, so it was not created by lifekernel init.`);
+      }
+      const from = marker.layoutVersion ?? 1;
+      const changes: Array<{ path: string; change: string; absolute: string; content: string }> = [];
+      if (from < 3) {
+        const template = join(vault.path, "_templates", "Daily.md");
+        const content = await readFile(template, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+        const data = content === null ? null : readFrontmatter(content);
+        const missing = Object.fromEntries(Object.entries(DAILY_TEMPLATE_FIELDS).filter(([key]) => data && !(key in data)));
+        if (content !== null && Object.keys(missing).length > 0) {
+          changes.push({ path: "_templates/Daily.md", change: `add frontmatter fields ${Object.keys(missing).join(", ")}`, absolute: template, content: setFrontmatter(content, missing) });
+        }
+      }
+      if (from < LAYOUT_VERSION) {
+        changes.push({ path: ".lifekernel/vault.json", change: `layoutVersion ${from} -> ${LAYOUT_VERSION}`, absolute: markerPath, content: `${JSON.stringify({ ...marker, layoutVersion: LAYOUT_VERSION }, null, 2)}\n` });
+      }
+      return { from, changes };
+    };
+    const report = (from: number, changes: Array<{ path: string; change: string }>, applied: boolean) => ({
+      vaultId: vault.id, from, to: Math.max(from, LAYOUT_VERSION), changes: changes.map(({ path, change }) => ({ path, change })), applied
+    });
+    if (!options.apply) { const { from, changes } = await plan(); return report(from, changes, false); }
+    return this.withVaultLock(vault.id, async () => {
+      const { from, changes } = await plan();
+      for (const change of changes) await replaceFile(change.absolute, change.content);
+      if (changes.length > 0) {
+        const event = { event: "vault_migrated", vaultId: vault.id, from, to: LAYOUT_VERSION, paths: changes.map((change) => change.path), at: this.now().toISOString() };
+        await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
+      }
+      return report(from, changes, changes.length > 0);
+    });
   }
 
   async recentAudit(limit = 20) {

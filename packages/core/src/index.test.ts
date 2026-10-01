@@ -396,3 +396,175 @@ describe("writer identity", () => {
     expect(anonymous).not.toHaveProperty("client");
   });
 });
+
+async function planningFixture() {
+  const f = await fixture();
+  Object.assign(f.config.vaults[0]!.routes, {
+    decision: { folder: "decisions", type: "decision", status: "proposed", area: "system", policy: "review", fields: ["status", "decided_on", "supersedes"] },
+    daily: { folder: "daily", type: "daily", status: "active", area: "life", policy: "auto", fields: ["energy", "focus_hours", "circle"] },
+    review: { folder: "reviews", type: "weekly-review", status: "active", area: "life", policy: "auto", period: "week", fields: ["status"] },
+    monthly: { folder: "reviews", type: "monthly-review", status: "active", area: "life", policy: "auto", period: "month" },
+    project: { folder: "projects", type: "project", status: "active", area: "projects", policy: "auto", fields: ["status", "next_action", "due"] }
+  });
+  return f;
+}
+const write = (fields: Record<string, unknown>) => ({ vaultId: "test", source: "test", sourceDate: "2026-09-30", ...fields });
+
+describe("set_frontmatter", () => {
+  it("accepts a proposed decision only with approval, and keeps the body", async () => {
+    const { kernel, vault } = await planningFixture();
+    await kernel.applyWrite(write({ requestId: "decision-0001", operation: "create", route: "decision", title: "Use TypeScript", body: "Because of the MCP SDK.", approved: true }));
+    const note = await kernel.readNote("test", "decisions/2026-09-30-use-typescript.md");
+    const request = write({ requestId: "decision-0002", operation: "set_frontmatter", route: "decision", targetPath: note.path, expectedSha256: note.sha256, fields: { status: "accepted", decided_on: "2026-09-30" } });
+    const preview = await kernel.previewWrite(request);
+    expect(preview.preview).toMatch(/^---\n[\s\S]*status: "accepted"[\s\S]*---$/);
+    expect(preview.preview).not.toContain("Because of the MCP SDK");
+    await expect(kernel.applyWrite(request)).rejects.toThrow(/requires user approval/);
+    await kernel.applyWrite({ ...request, approved: true });
+    const after = await readFile(join(vault, note.path), "utf8");
+    expect(after).toContain('status: "accepted"');
+    expect(after).toContain('decided_on: "2026-09-30"');
+    expect(after).toContain("Because of the MCP SDK.");
+  });
+
+  it("rejects fields outside the route allowlist, protected fields, bodies, and multi-line values", async () => {
+    const { kernel } = await planningFixture();
+    await kernel.applyWrite(write({ requestId: "project-0001", operation: "create", route: "project", title: "Alpha", body: "x" }));
+    const note = await kernel.readNote("test", "projects/2026-09-30-alpha.md");
+    const base = write({ requestId: "project-0002", operation: "set_frontmatter", route: "project", targetPath: note.path, expectedSha256: note.sha256 });
+    await expect(kernel.previewWrite({ ...base, fields: { horizon: "long" } })).rejects.toThrow(/does not allow setting horizon/);
+    await expect(kernel.previewWrite({ ...base, fields: { ai_access: "context" } })).rejects.toThrow(/does not allow setting ai_access/);
+    await expect(kernel.previewWrite({ ...base, fields: { status: "done" }, body: "x" })).rejects.toThrow(/body is not accepted/);
+    await expect(kernel.previewWrite({ ...base, fields: {} })).rejects.toThrow(/fields is required/);
+    await expect(kernel.previewWrite({ ...base, fields: { next_action: "line one\nline two" } })).rejects.toThrow(/single line/);
+    await expect(kernel.previewWrite({ ...base, operation: "append", body: "x", fields: { status: "done" } })).rejects.toThrow(/only accepted for create and set_frontmatter/);
+  });
+
+  it("refuses protected fields in a route config", async () => {
+    const { root } = await fixture();
+    const { loadConfig } = await import("./index.js");
+    await writeFile(join(root, "c.json"), JSON.stringify({ version: 1, vaults: [{ id: "v", kind: "personal", path: "./v", mode: "read-write", routes: { r: { folder: "r", type: "note", status: "active", area: "x", fields: ["ai_access"] } } }] }));
+    await expect(loadConfig(join(root, "c.json"))).rejects.toThrow(/protected field/);
+  });
+
+  it("sets allowed fields on create", async () => {
+    const { kernel, vault } = await planningFixture();
+    await kernel.applyWrite(write({ requestId: "daily-0001", operation: "create", route: "daily", title: "Circle", body: "## Day summary\n\nGood.", fields: { energy: 4, circle: "done" } }));
+    const after = await readFile(join(vault, "daily/2026-09-30.md"), "utf8");
+    expect(after).toMatch(/source_date: "2026-09-30"\nenergy: 4\ncircle: "done"\n---/);
+    await expect(kernel.previewWrite(write({ requestId: "daily-0002", operation: "create", route: "session", title: "S", body: "x", fields: { energy: 1 } }))).rejects.toThrow(/does not allow setting energy/);
+  });
+});
+
+describe("periodic notes", () => {
+  it("keeps one weekly and one monthly note per period and looks them up by date", async () => {
+    const { kernel } = await planningFixture();
+    await expect(kernel.periodNote("test", { route: "review", date: "2026-10-01" })).resolves.toMatchObject({ exists: false, path: "reviews/2026-W40.md", key: "2026-W40", start: "2026-09-28", end: "2026-10-04", period: "week" });
+    await kernel.applyWrite(write({ requestId: "week-0001", operation: "create", route: "review", title: "Week 40", body: "x", sourceDate: "2026-09-29" }));
+    await expect(kernel.applyWrite(write({ requestId: "week-0002", operation: "create", route: "review", title: "Another title", body: "x", sourceDate: "2026-10-04" }))).rejects.toThrow(/already exists: reviews\/2026-W40.md/);
+    await expect(kernel.periodNote("test", { period: "week", date: "2026-10-04" })).resolves.toMatchObject({ exists: true, route: "review" });
+    await kernel.applyWrite(write({ requestId: "month-0001", operation: "create", route: "monthly", title: "September", body: "x" }));
+    await expect(kernel.periodNote("test", { period: "month", date: "2026-09-01" })).resolves.toMatchObject({ exists: true, path: "reviews/2026-09.md" });
+  });
+
+  it("asks for a route when the request is ambiguous", async () => {
+    const { kernel, config } = await planningFixture();
+    config.vaults[0]!.routes.other = { folder: "other", type: "weekly-review", status: "active", area: "x", policy: "auto", period: "week", fields: [] };
+    await expect(kernel.periodNote("test", { period: "week" })).rejects.toThrow(/Several weekly routes exist; pass route/);
+    await expect(kernel.periodNote("test", { period: "quarter" })).rejects.toThrow(/no quarterly route/);
+    await expect(kernel.periodNote("test", { route: "review" })).resolves.toMatchObject({ date: "2026-09-30", key: "2026-W40" });
+  });
+});
+
+describe("note listing", () => {
+  it("filters by frontmatter, folder, and updated date, and skips ignored and hidden notes", async () => {
+    const { kernel, vault } = await planningFixture();
+    const projectNote = (status: string, updated: string, access = "context") => `---\nid: x\ntype: project\nstatus: ${status}\narea: work\nprivacy: personal\nai_access: ${access}\nupdated: "${updated}"\n---\n\n# Project ${status}\n`;
+    await mkdir(join(vault, "projects"));
+    await mkdir(join(vault, "_templates"));
+    await writeFile(join(vault, "projects/a.md"), projectNote("active", "2026-09-01"), "utf8");
+    await writeFile(join(vault, "projects/b.md"), projectNote("active", "2026-09-29"), "utf8");
+    await writeFile(join(vault, "projects/c.md"), projectNote("done", "2026-09-01"), "utf8");
+    await writeFile(join(vault, "projects/hidden.md"), projectNote("active", "2026-09-01", "none"), "utf8");
+    await writeFile(join(vault, "_templates/Project.md"), projectNote("active", "2026-01-01"), "utf8");
+
+    const active = await kernel.listNotes("test", { type: "project", status: "active" });
+    expect(active.map((note) => note.path)).toEqual(["projects/a.md", "projects/b.md"]);
+    expect(active[0]).toMatchObject({ title: "Project active", frontmatter: { area: "work", updated: "2026-09-01" } });
+    expect((await kernel.listNotes("test", { type: "project", status: "active", updatedBefore: "2026-09-15" })).map((note) => note.path)).toEqual(["projects/a.md"]);
+    expect((await kernel.listNotes("test", { folder: "projects/", limit: 1 }))).toHaveLength(1);
+  });
+});
+
+describe("open tasks", () => {
+  it("collects open tasks across notes, sorted by due date then priority, and honors filters and access", async () => {
+    const { kernel, vault } = await planningFixture();
+    await mkdir(join(vault, "projects"));
+    await writeFile(join(vault, "projects/alpha.md"), `${frontmatter()}\n# Alpha\n\n- [ ] Later 📅 2026-10-10\n- [ ] Soon 📅 2026-10-02 🔼\n- [x] Done 📅 2026-09-01\n- [ ] Someday\n`, "utf8");
+    await writeFile(join(vault, "projects/beta.md"), `${frontmatter()}\n# Beta\n\n- [/] Urgent 📅 2026-10-02 ⏫\n`, "utf8");
+    await writeFile(join(vault, "projects/secret.md"), `${frontmatter("none")}\n# Secret\n\n- [ ] Hidden 📅 2026-09-30\n`, "utf8");
+
+    const all = await kernel.openTasks({ vaultId: "test" });
+    expect(all.map((task) => task.text)).toEqual(["Urgent", "Soon", "Later", "Someday"]);
+    expect(all[0]).toMatchObject({ path: "projects/beta.md", line: 12, status: "in-progress", priority: "high" });
+    expect((await kernel.openTasks({ vaultId: "test", dueBy: "2026-10-05" })).map((task) => task.text)).toEqual(["Urgent", "Soon", "Someday"]);
+    expect((await kernel.openTasks({ vaultId: "test", dueBy: "2026-10-05", includeUndated: false })).map((task) => task.text)).toEqual(["Urgent", "Soon"]);
+    expect((await kernel.openTasks({ vaultId: "test", path: "projects/alpha.md" }))).toHaveLength(3);
+    await expect(kernel.openTasks({ vaultId: "test", path: "projects/secret.md" })).rejects.toThrow(/excluded/);
+  });
+});
+
+describe("search terms", () => {
+  it("matches every term in any order, folds case and accents, and filters by type", async () => {
+    const { kernel, vault } = await planningFixture();
+    await writeFile(join(vault, "plan.md"), "---\nid: p\ntype: plan\nstatus: active\n---\n\n# Plan\n\nİstanbul ofisi için çalışma planı.\nBütçe ayrı.\n", "utf8");
+    await writeFile(join(vault, "other.md"), "---\nid: o\ntype: note\nstatus: active\n---\n\n# Other\n\nSadece istanbul.\n", "utf8");
+    expect((await kernel.search("calisma istanbul", "test")).map((hit) => hit.path)).toEqual(["plan.md"]);
+    expect((await kernel.search("ISTANBUL", "test")).map((hit) => hit.path).sort()).toEqual(["other.md", "plan.md"]);
+    expect((await kernel.search("istanbul", "test", 20, false, { type: "note" })).map((hit) => hit.path)).toEqual(["other.md"]);
+  });
+});
+
+describe("ai_access parsing", () => {
+  it("reads the value through YAML, allows trailing comments, and treats unknown values as restricted", async () => {
+    const { kernel, vault } = await fixture();
+    await writeFile(join(vault, "comment.md"), "---\nid: c\nai_access: none # private\n---\n\nneedle\n", "utf8");
+    await writeFile(join(vault, "typo.md"), "---\nid: t\nai_access: nnone\n---\n\nneedle\n", "utf8");
+    await expect(kernel.readNote("test", "comment.md", true)).rejects.toThrow(/excluded/);
+    await expect(kernel.readNote("test", "typo.md")).rejects.toThrow(/explicit restricted/);
+    await expect(kernel.search("needle", "test")).resolves.toEqual([]);
+  });
+});
+
+describe("layout migration", () => {
+  async function layoutTwoVault() {
+    const f = await fixture();
+    await mkdir(join(f.vault, ".lifekernel"));
+    await mkdir(join(f.vault, "_templates"));
+    await writeFile(join(f.vault, ".lifekernel/vault.json"), '{ "specVersion": 1, "layoutVersion": 2, "kind": "personal" }', "utf8");
+    await writeFile(join(f.vault, "_templates/Daily.md"), '---\nid: "{{id}}"\ntype: "daily"\nenergy: "kept"\n---\n\n# {{date}}\n', "utf8");
+    return f;
+  }
+
+  it("reports first, then adds the daily fields and bumps the layout once", async () => {
+    const { kernel, vault } = await layoutTwoVault();
+    const report = await kernel.migrate("test");
+    expect(report).toEqual({ vaultId: "test", from: 2, to: 3, applied: false, changes: [
+      { path: "_templates/Daily.md", change: "add frontmatter fields focus_hours, morning_plan, circle, circle_at" },
+      { path: ".lifekernel/vault.json", change: "layoutVersion 2 -> 3" }
+    ] });
+    expect(await readFile(join(vault, "_templates/Daily.md"), "utf8")).not.toContain("circle");
+
+    await expect(kernel.migrate("test", { apply: true })).resolves.toMatchObject({ applied: true });
+    const template = await readFile(join(vault, "_templates/Daily.md"), "utf8");
+    expect(template).toContain('energy: "kept"\nfocus_hours: ""\nmorning_plan: ""\ncircle: ""\ncircle_at: ""\n---');
+    expect(JSON.parse(await readFile(join(vault, ".lifekernel/vault.json"), "utf8"))).toEqual({ specVersion: 1, layoutVersion: 3, kind: "personal" });
+    await expect(kernel.migrate("test", { apply: true })).resolves.toEqual({ vaultId: "test", from: 3, to: 3, changes: [], applied: false });
+    expect((await kernel.recentAudit(5)).filter((event) => event.event === "vault_migrated")).toHaveLength(1);
+  });
+
+  it("refuses folders that lifekernel init did not create", async () => {
+    const { kernel } = await fixture();
+    await expect(kernel.migrate("test")).rejects.toThrow(/not created by lifekernel init/);
+  });
+});

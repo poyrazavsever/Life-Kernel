@@ -75,7 +75,7 @@ describe("HTTP surface", () => {
       expect((await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${token}`, origin: "https://evil.example" } })).status).toBe(403);
       const ok = await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${token}` } });
       expect(ok.status).toBe(200);
-      expect(await ok.json()).toEqual([{ id: "test", kind: "personal", mode: "read-write", routes: [{ name: "daily", folder: "daily", type: "daily", policy: "auto" }] }]);
+      expect(await ok.json()).toEqual([{ id: "test", kind: "personal", mode: "read-write", routes: [{ name: "daily", folder: "daily", type: "daily", policy: "auto", period: "day", fields: [] }] }]);
     } finally { await close(); }
   });
 
