@@ -14,42 +14,72 @@
           "type": "session",
           "status": "active",
           "area": "system",
-          "policy": "auto"
+          "policy": "auto",
+          "fields": [
+            "status"
+          ]
         },
         "daily": {
           "folder": "daily",
           "type": "daily",
           "status": "active",
           "area": "life",
-          "policy": "auto"
+          "policy": "auto",
+          "period": "day",
+          "fields": [
+            "energy",
+            "focus_hours",
+            "morning_plan",
+            "circle",
+            "circle_at"
+          ]
         },
         "review": {
           "folder": "reviews",
           "type": "weekly-review",
           "status": "active",
           "area": "life",
-          "policy": "auto"
+          "policy": "auto",
+          "period": "week",
+          "fields": [
+            "status"
+          ]
         },
         "decision": {
           "folder": "decisions",
           "type": "decision",
           "status": "proposed",
           "area": "system",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "decided_on",
+            "supersedes"
+          ]
         },
         "goal": {
           "folder": "goals",
           "type": "goal",
           "status": "active",
           "area": "life",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "horizon",
+            "target_date"
+          ]
         },
         "project": {
           "folder": "projects",
           "type": "project",
           "status": "active",
           "area": "projects",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status",
+            "due",
+            "next_action"
+          ]
         },
         "plan": {
           "folder": "schedule",
@@ -63,7 +93,10 @@
           "type": "note",
           "status": "inbox",
           "area": "system",
-          "policy": "auto"
+          "policy": "auto",
+          "fields": [
+            "status"
+          ]
         },
         "state": {
           "folder": "state",
@@ -91,7 +124,10 @@
           "type": "area",
           "status": "active",
           "area": "life",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "status"
+          ]
         }
       }
     }
