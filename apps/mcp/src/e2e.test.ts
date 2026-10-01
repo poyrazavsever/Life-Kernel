@@ -87,6 +87,25 @@ describe("daily circle against the starter vault", () => {
     expect((await call("note_list", { vaultId: "personal", type: "decision", status: "accepted" }))).toHaveLength(1);
   });
 
+  it("reads the rhythm onboarding writes and reports and prepares each ritual", async () => {
+    const { call } = await session();
+    const date = "2026-09-30";
+    const method = await call("note_read", { vaultId: "personal", path: "system/Method.md" });
+    const rhythm = { daily_circle_time: "21:30", morning_plan_time: "08:30", morning_plan_days: "weekdays", weekly_review_day: "sun", weekly_review_time: "20:00", quiet_hours: "23:00-08:00" };
+    await call("write_apply", { request: { requestId: "e2e-rhythm-0001", vaultId: "personal", operation: "set_frontmatter", route: "method", targetPath: "system/Method.md", expectedSha256: method.sha256, fields: rhythm, source: "onboarding", sourceDate: date, approved: true } });
+
+    const status = await call("ritual_status", { vaultId: "personal" });
+    expect(status.quietHours).toEqual({ start: "23:00", end: "08:00" });
+    const states = Object.fromEntries(status.rituals.map((ritual: { id: string; state: string }) => [ritual.id, ritual.state]));
+    expect(states["monthly-review"]).toBe("not-scheduled");
+    expect(states["daily-circle"]).not.toBe("not-scheduled");
+    expect((await call("context_bundle", { vaultId: "personal" })).rituals.rituals).toHaveLength(5);
+
+    const agenda = await call("ritual_agenda", { vaultId: "personal", ritual: "weekly-review", date });
+    expect(agenda).toMatchObject({ period: { key: "2026-W40" }, reviewNote: { path: "reviews/2026-W40.md", exists: false }, stats: { days: 7, daysRecorded: 0 } });
+    await expect(call("ritual_agenda", { vaultId: "personal", ritual: "evening" })).rejects.toThrow();
+  });
+
   it("requires approval for review routes such as the planning method", async () => {
     const { call } = await session();
     const note = await call("note_read", { vaultId: "personal", path: "system/Method.md" });
