@@ -1,6 +1,7 @@
 import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { actionLink, actionSecret, verifyAction, type NudgeAction } from "./actions.js";
 import { ChannelSchema, createChannel, defaultDeps, type Channel, type ChannelDeps, type NudgeMessage } from "./channels.js";
 import { replaceFile, withFileLock } from "./files.js";
 import type { LifeKernel, RitualReport, WriteContext } from "./index.js";
@@ -14,13 +15,16 @@ export const NotificationsSchema = z.object({
   locale: z.enum(["en", "tr"]).default("en"),
   /** One gentle follow-up this many minutes after a reminder, if the ritual is still open; 0 turns follow-ups off. */
   followUpAfterMinutes: z.number().int().min(0).max(24 * 60).default(90),
+  /** Public https origin of the HTTP server; when set, ntfy reminders carry signed snooze and skip buttons. */
+  actionBaseUrl: z.string().url().refine((value) => value.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(value), "actionBaseUrl must be https, or http on localhost.").optional(),
   channels: z.array(ChannelSchema).default([])
 });
 export type NotificationsConfig = z.infer<typeof NotificationsSchema>;
 type Locale = NotificationsConfig["locale"];
 
 interface Phrases { title: string; reminder: string; followUp: string; prompt: string }
-const TEXT: Record<Locale, Record<RitualId, Phrases> & { catchUp: string; test: { title: string; body: string } }> = {
+interface Labels { start: string; snooze: string; skip: string }
+export const TEXT: Record<Locale, Record<RitualId, Phrases> & { catchUp: string; test: { title: string; body: string }; labels: Labels }> = {
   en: {
     "morning-plan": { title: "Morning plan", reminder: "Five minutes to choose today's focus.", followUp: "Still a good moment to choose today's focus.", prompt: "Let's plan the day." },
     "daily-circle": { title: "Daily circle", reminder: "Ten to twenty minutes to close the day.", followUp: "There is still time to close the day tonight, or to skip it.", prompt: "Let's do the circle." },
@@ -28,7 +32,8 @@ const TEXT: Record<Locale, Record<RitualId, Phrases> & { catchUp: string; test: 
     "monthly-review": { title: "Monthly review", reminder: "Time to check the month against your goals.", followUp: "Your monthly review is waiting; another day is fine too.", prompt: "Let's do the monthly review." },
     "quarterly-review": { title: "Quarterly review", reminder: "Time to check your direction for the next quarter.", followUp: "Your quarterly review is waiting; another day is fine too.", prompt: "Let's do the quarterly review." },
     catchUp: "Yesterday's circle was not recorded; a two-minute catch-up is an option.",
-    test: { title: "Life Kernel", body: "Test notification. Ritual reminders will arrive like this." }
+    test: { title: "Life Kernel", body: "Test notification. Ritual reminders will arrive like this." },
+    labels: { start: "Start", snooze: "Snooze 1h", skip: "Skip" }
   },
   tr: {
     "morning-plan": { title: "Sabah planı", reminder: "Bugünün odağını seçmek için beş dakika.", followUp: "Bugünün odağını seçmek için hâlâ iyi bir an.", prompt: "Günü planlayalım." },
@@ -37,7 +42,8 @@ const TEXT: Record<Locale, Record<RitualId, Phrases> & { catchUp: string; test: 
     "monthly-review": { title: "Aylık değerlendirme", reminder: "Ayı hedeflerinle karşılaştırma zamanı.", followUp: "Aylık değerlendirme seni bekliyor; başka bir gün de olur.", prompt: "Aylık değerlendirmeyi yapalım." },
     "quarterly-review": { title: "Çeyreklik değerlendirme", reminder: "Önümüzdeki çeyreğin yönünü gözden geçirme zamanı.", followUp: "Çeyreklik değerlendirme seni bekliyor; başka bir gün de olur.", prompt: "Çeyreklik değerlendirmeyi yapalım." },
     catchUp: "Dünün değerlendirmesi kaydedilmedi; istersen iki dakikalık bir telafi yapabiliriz.",
-    test: { title: "Life Kernel", body: "Deneme bildirimi. Ritüel hatırlatmaları böyle gelecek." }
+    test: { title: "Life Kernel", body: "Deneme bildirimi. Ritüel hatırlatmaları böyle gelecek." },
+    labels: { start: "Başla", snooze: "1 saat ertele", skip: "Atla" }
   }
 };
 
@@ -61,6 +67,10 @@ export interface NudgeState {
   sent: Record<string, { reminder?: string; followUp?: string }>;
   snoozed: Partial<Record<RitualId, string>>;
   pausedUntil?: string;
+  /** Nonces of action links already used, with their expiry in Unix seconds. */
+  usedActions?: Record<string, number>;
+  /** The next Telegram update to read. */
+  telegramOffset?: number;
 }
 
 export interface Nudge { ritual: RitualId; occurrence: string; kind: "reminder" | "follow-up" }
@@ -69,7 +79,7 @@ export interface HeldNudge { ritual: RitualId; reason: "paused" | "quiet-hours" 
 const OPEN_STATES = new Set(["due", "overdue"]);
 const STATE_RETENTION_DAYS = 35;
 
-function occurrenceOf(report: RitualReport, status: RitualStatus): string {
+export function occurrenceOf(report: RitualReport, status: RitualStatus): string {
   const ritual = RITUALS.find((candidate) => candidate.id === status.id)!;
   return `${status.id}:${ritual.kind === "daily" ? report.date : status.period}`;
 }
@@ -140,7 +150,8 @@ export function nudgeMessage(nudge: Nudge, locale: Locale, extra: { agendaLine?:
   const lines = [nudge.kind === "reminder" ? phrases.reminder : phrases.followUp];
   if (extra.agendaLine) lines.push(extra.agendaLine);
   if (extra.catchUp) lines.push(TEXT[locale].catchUp);
-  return { ritual: nudge.ritual, kind: nudge.kind, title: phrases.title, body: lines.join("\n"), prompt: phrases.prompt };
+  const labels = TEXT[locale].labels;
+  return { ritual: nudge.ritual, kind: nudge.kind, title: phrases.title, body: lines.join("\n"), prompt: phrases.prompt, startLabel: labels.start, actions: [{ action: "snooze", label: labels.snooze }, { action: "skip", label: labels.skip }] };
 }
 
 function statePath(kernel: LifeKernel): string {
@@ -150,7 +161,7 @@ function statePath(kernel: LifeKernel): string {
 export async function loadNudgeState(kernel: LifeKernel): Promise<NudgeState> {
   try {
     const raw = JSON.parse(await readFile(statePath(kernel), "utf8")) as Partial<NudgeState>;
-    return { sent: raw.sent ?? {}, snoozed: raw.snoozed ?? {}, ...(raw.pausedUntil ? { pausedUntil: raw.pausedUntil } : {}) };
+    return { ...raw, sent: raw.sent ?? {}, snoozed: raw.snoozed ?? {} };
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { sent: {}, snoozed: {} };
     throw error;
@@ -161,13 +172,14 @@ async function saveNudgeState(kernel: LifeKernel, state: NudgeState, now: Date):
   const cutoff = now.getTime() - STATE_RETENTION_DAYS * 86_400_000;
   for (const [key, entry] of Object.entries(state.sent)) if (new Date(entry.followUp ?? entry.reminder ?? 0).getTime() < cutoff) delete state.sent[key];
   for (const [ritual, until] of Object.entries(state.snoozed)) if (new Date(until).getTime() < now.getTime()) delete state.snoozed[ritual as RitualId];
+  for (const [nonce, expires] of Object.entries(state.usedActions ?? {})) if (expires * 1000 < now.getTime()) delete state.usedActions![nonce];
   await replaceFile(statePath(kernel), `${JSON.stringify(state, null, 2)}\n`);
 }
 
 const nudgeLock = (kernel: LifeKernel) => join(kernel.config.stateDir, "locks", "nudges.lock");
 
 /** Change the reminder state under the scheduler's lock. */
-async function updateState(kernel: LifeKernel, now: Date, change: (state: NudgeState) => void): Promise<NudgeState> {
+export async function updateState(kernel: LifeKernel, now: Date, change: (state: NudgeState) => void): Promise<NudgeState> {
   return withFileLock(nudgeLock(kernel), "Another reminder check is running; try again.", async () => {
     const state = await loadNudgeState(kernel);
     change(state);
@@ -228,8 +240,15 @@ export async function tick(kernel: LifeKernel, options: { at?: Date; dryRun?: bo
       }
       const catchUp = nudge.ritual === "morning-plan" && nudge.kind === "reminder" && missedYesterday;
       const outcomes: TickResult["sent"][number]["channels"] = [];
+      // Signed links are made once per nudge and shared by the channels that can show them.
+      const links: Partial<Record<NudgeAction, string>> = {};
+      if (config.actionBaseUrl && !dryRun) {
+        const secret = await actionSecret(kernel);
+        for (const action of ["snooze", "skip"] as const) links[action] = actionLink(config.actionBaseUrl, secret, { ritual: nudge.ritual, action, occurrence: nudge.occurrence, now });
+      }
       for (const channel of targets) {
-        const message = nudgeMessage(nudge, config.locale, { ...(channel.config.content === "agenda" && line ? { agendaLine: line } : {}), catchUp });
+        const base = nudgeMessage(nudge, config.locale, { ...(channel.config.content === "agenda" && line ? { agendaLine: line } : {}), catchUp });
+        const message = { ...base, actions: base.actions!.map((action) => links[action.action] ? { ...action, url: links[action.action] } : action) };
         if (dryRun) { outcomes.push({ type: channel.type, ok: true }); continue; }
         try { await channel.send(message); outcomes.push({ type: channel.type, ok: true }); } catch (error: unknown) {
           outcomes.push({ type: channel.type, ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -303,4 +322,35 @@ export async function skipRitual(kernel: LifeKernel, vaultId: string, ritual: Ri
   const marked = await kernel.applyWrite({ ...base, requestId: id, operation: "set_frontmatter", targetPath: found.path, expectedSha256: found.sha256, fields: { [field]: "skipped" } }, context);
   if (!reason.trim()) return [marked];
   return [marked, await kernel.applyWrite({ ...base, requestId: `${id}-reason`, operation: "append", targetPath: found.path, expectedSha256: marked.afterSha256, body: sentence }, context)];
+}
+
+/**
+ * Snooze a ritual for an hour or record a skip, on behalf of a button. Both are idempotent, so a button
+ * pressed twice or delivered twice changes nothing more.
+ */
+export async function applyNudgeAction(kernel: LifeKernel, ritual: RitualId, action: NudgeAction, source: string, at: Date = new Date()) {
+  if (action === "snooze") return snoozeRitual(kernel, ritual, 60, at);
+  return skipRitual(kernel, notificationsVault(kernel), ritual, "", { client: { name: source } });
+}
+
+/**
+ * Perform the action behind a signed link from a notification. A link works once, until it expires, and
+ * only for the reminder it came with; one from an earlier day changes nothing.
+ */
+export async function performLinkedAction(kernel: LifeKernel, query: Record<string, unknown>, at: Date = new Date()) {
+  const verified = verifyAction(await actionSecret(kernel), query, at);
+  await updateState(kernel, at, (state) => {
+    state.usedActions ??= {};
+    if (state.usedActions[verified.nonce]) throw new Error("This link was already used.");
+    state.usedActions[verified.nonce] = verified.expires;
+  });
+  const report = await kernel.ritualStatus(notificationsVault(kernel), { at });
+  const status = report.rituals.find((candidate) => candidate.id === verified.ritual);
+  if (!status || occurrenceOf(report, status) !== verified.occurrence) {
+    await audit(kernel, { event: "nudge_action_stale", ritual: verified.ritual, action: verified.action, at: at.toISOString() });
+    return { ok: false, ritual: verified.ritual, action: verified.action, message: "This reminder is from an earlier day; nothing changed." };
+  }
+  await applyNudgeAction(kernel, verified.ritual, verified.action, "notification-link", at);
+  await audit(kernel, { event: "nudge_action", ritual: verified.ritual, action: verified.action, via: "link", at: at.toISOString() });
+  return { ok: true, ritual: verified.ritual, action: verified.action, message: verified.action === "snooze" ? "Snoozed for one hour." : "Skipped." };
 }

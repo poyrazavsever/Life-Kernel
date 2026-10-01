@@ -19,9 +19,12 @@ export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tas
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
 export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
+export { actionLink, actionSecret, verifyAction, NUDGE_ACTIONS, type NudgeAction } from "./actions.js";
+export { pollTelegram, telegramChats } from "./telegram.js";
+export { formatRituals, formatToday, todaySummary, type TodaySummary } from "./today.js";
 export { RITUAL_FIELDS, RITUAL_IDS, type QuietHours, type RitualId, type RitualState, type RitualStatus } from "./rituals.js";
 export { ChannelSchema, createChannel, desktopCommand, type Channel, type ChannelConfig, type ChannelDeps, type NudgeMessage } from "./channels.js";
-export { decideNudges, loadNudgeState, notificationsVault, NotificationsSchema, nudgeMessage, pauseNudges, sendTestNotification, skipRitual, snoozeRitual, tick, type NotificationsConfig, type NudgeState, type TickResult } from "./nudges.js";
+export { applyNudgeAction, performLinkedAction, decideNudges, loadNudgeState, notificationsVault, NotificationsSchema, nudgeMessage, pauseNudges, sendTestNotification, skipRitual, snoozeRitual, tick, type NotificationsConfig, type NudgeState, type TickResult } from "./nudges.js";
 
 /** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
 export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
