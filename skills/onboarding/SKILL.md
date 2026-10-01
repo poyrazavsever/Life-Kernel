@@ -42,7 +42,7 @@ Show a compact map: areas, goals by horizon, projects, availability summary, and
 Then write, following the write protocol in the daily-circle skill:
 
 - `system/Method.md` (route `method`), `profile/Profile.md` (route `profile`), `schedule/Availability.md` and `schedule/Capacity.md` (route `plan`), `state/Current State.md` (route `state`): fill sections with `update_section`, copying headings exactly.
-- One note per goal (route `goal`), area (route `area`), and project (route `project`) using the templates' sections; link each from `goals/Goals`, `areas/Areas`, or `projects/Projects` with `append`.
+- One note per goal (route `goal`), area (route `area`), and project (route `project`) using the templates' sections; link each from `goals/Goals`, `areas/Areas`, or `projects/Projects` with `append`. Pass known frontmatter as `fields`: `horizon` and `target_date` for goals, `next_action` and `due` for projects. Write project tasks as checklist items (`- [ ] Task 📅 2026-10-04`).
 - A session note (route `session`) recording that onboarding happened and what was decided.
 - Routes with policy `review` need the user's yes from the confirmation step, then `approved: true`.
 
