@@ -10,6 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run src"
   },
-  "dependencies": { "zod": "^3.25.0" }
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^3.25.0"
+  }
 }
-
