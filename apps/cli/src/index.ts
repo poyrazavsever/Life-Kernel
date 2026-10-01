@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { capture, formatToday, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
+import { capture, createAgentToken, formatToday, grantScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 
@@ -33,7 +33,9 @@ async function main() {
   if (command === "connect") {
     if (!isClient(args[0])) throw new Error(`Usage: lifekernel connect <${CLIENTS.join("|")}>`);
     const stdioPath = resolve(here, "../../mcp/dist/stdio.js");
-    const { file, content } = connectSnippet(args[0], stdioPath, resolve(configPath));
+    const vaults = flag("--vaults");
+    if (vaults) parseVaultGrants(vaults, (await loadConfig(configPath)).vaults.map((vault) => vault.id));
+    const { file, content } = connectSnippet(args[0], stdioPath, resolve(configPath), vaults);
     process.stdout.write(`# ${file}
 ${content}
 `);
@@ -68,6 +70,19 @@ ${content}
     process.stdout.write(`${formatToday(summary, kernel.config.notifications?.locale ?? "en")}\n`);
     return;
   }
+  if (command === "token") {
+    const stateDir = kernel.config.stateDir;
+    if (args[0] === "list") return output(await listAgentTokens(stateDir));
+    if (args[0] === "revoke") return output({ revoked: await revokeAgentToken(stateDir, args[1] ?? "") });
+    if (args[0] === "create") {
+      const vaults = flag("--vaults");
+      const readOnly = args.includes("--read-only");
+      const scopes = ["lifekernel:read", ...(readOnly ? [] : ["lifekernel:write"]), ...(vaults ? grantScopes(parseVaultGrants(vaults, kernel.config.vaults.map((vault) => vault.id))) : [])];
+      const created = await createAgentToken(stateDir, positional()[1] ?? "", scopes);
+      return output({ ...created, note: "Copy the token now; only its hash is stored. Send it as Authorization: Bearer <token>." });
+    }
+    throw new Error("Usage: lifekernel token <create <name> [--vaults startup:write,personal:read] [--read-only]|list|revoke <name>>");
+  }
   if (command === "telegram") {
     if (args[0] === "setup") return output({ chats: await telegramChats(kernel), next: "Put your chat's id in LIFEKERNEL_TELEGRAM_CHAT_ID in the .env beside the config." });
     if (args[0] === "poll") return output(await pollTelegram(kernel));
@@ -96,7 +111,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 
@@ -111,7 +126,7 @@ function flag(name: string): string | undefined {
 
 /** Arguments that are neither flags nor flag values. */
 function positional(): string[] {
-  return args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && args[index - 1]!.startsWith("--") && ["--template", "--id", "--every", "--config"].includes(args[index - 1]!)));
+  return args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && args[index - 1]!.startsWith("--") && ["--template", "--id", "--every", "--config", "--vaults"].includes(args[index - 1]!)));
 }
 
 type ConfigFile = { timezone?: string; vaults: Array<{ id: string; kind: string; path: string; mode: string; routes: Record<string, unknown> }> } & Record<string, unknown>;

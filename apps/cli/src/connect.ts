@@ -15,20 +15,21 @@ const JSON_CLIENTS: Partial<Record<Client, { file: string; key: string; type?: b
 };
 
 /** Build the copy-paste setup for a local stdio connection. Paths must be absolute. */
-export function connectSnippet(client: Client, stdioPath: string, configPath: string): { file: string; content: string } {
+export function connectSnippet(client: Client, stdioPath: string, configPath: string, vaults?: string): { file: string; content: string } {
+  const env: Record<string, string> = { LIFEKERNEL_CONFIG: configPath, ...(vaults ? { LIFEKERNEL_VAULTS: vaults } : {}) };
   const json = JSON_CLIENTS[client];
   if (json) {
-    const server = { ...(json.type ? { type: "stdio" } : {}), command: "node", args: [stdioPath], env: { LIFEKERNEL_CONFIG: configPath } };
+    const server = { ...(json.type ? { type: "stdio" } : {}), command: "node", args: [stdioPath], env };
     return { file: json.file, content: JSON.stringify({ [json.key]: { lifekernel: server } }, null, 2) };
   }
   if (client === "claude-code") {
     return {
       file: "run in a terminal",
-      content: `claude mcp add lifekernel --env LIFEKERNEL_CONFIG="${configPath}" -- node "${stdioPath}"`
+      content: `claude mcp add lifekernel ${Object.entries(env).map(([key, value]) => `--env ${key}="${value}"`).join(" ")} -- node "${stdioPath}"`
     };
   }
   return {
     file: "~/.codex/config.toml",
-    content: `[mcp_servers.lifekernel]\ncommand = "node"\nargs = ['${stdioPath}']\nenv = { LIFEKERNEL_CONFIG = '${configPath}' }`
+    content: `[mcp_servers.lifekernel]\ncommand = "node"\nargs = ['${stdioPath}']\nenv = { ${Object.entries(env).map(([key, value]) => `${key} = '${value}'`).join(", ")} }`
   };
 }

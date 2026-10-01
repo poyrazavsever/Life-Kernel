@@ -27,6 +27,12 @@ describe("connect snippets", () => {
     expect(JSON.parse(connectSnippet("vscode", stdio, config).content).servers.lifekernel).toEqual({ type: "stdio", command: "node", args: [stdio], env: { LIFEKERNEL_CONFIG: config } });
   });
 
+  it("limits a client to vault grants through LIFEKERNEL_VAULTS", () => {
+    expect(JSON.parse(connectSnippet("cursor", stdio, config, "startup:write").content).mcpServers.lifekernel.env).toEqual({ LIFEKERNEL_CONFIG: config, LIFEKERNEL_VAULTS: "startup:write" });
+    expect(connectSnippet("claude-code", stdio, config, "startup:write").content).toContain('--env LIFEKERNEL_VAULTS="startup:write"');
+    expect(connectSnippet("codex", stdio, config, "startup:write").content).toContain("LIFEKERNEL_VAULTS = 'startup:write'");
+  });
+
   it("recognizes only supported clients", () => {
     expect(isClient("codex")).toBe(true);
     expect(isClient("cursor")).toBe(true);
