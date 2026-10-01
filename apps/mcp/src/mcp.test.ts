@@ -35,7 +35,7 @@ describe("MCP tools", () => {
     await client.connect(clientSide);
 
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(["audit_recent", "context_bundle", "daily_get", "note_backlinks", "note_read", "skill_get", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
+    expect(names).toEqual(["audit_recent", "context_bundle", "daily_get", "note_backlinks", "note_list", "note_read", "period_get", "skill_get", "tasks_open", "vault_list", "vault_search", "vault_validate", "write_apply", "write_preview"]);
 
     const search = await client.callTool({ name: "vault_search", arguments: { query: "needle" } });
     const text = (search.content as Array<{ text: string }>)[0]!.text;
@@ -127,7 +127,7 @@ describe("skills over MCP", () => {
     const routes = new Set(Object.keys(config.vaults[0]!.routes));
     for (const name of ["onboarding", "daily-circle", "weekly-review", "second-brain", "project-memory"]) {
       const text = ((await client.callTool({ name: "skill_get", arguments: { name } })).content as Array<{ text: string }>)[0]!.text;
-      for (const [, tool] of text.matchAll(/`((?:vault|note|write|daily|context|audit|skill)_[a-z_]+)`/g)) expect(tools.has(tool!), `${name} mentions unknown tool ${tool}`).toBe(true);
+      for (const [, tool] of text.matchAll(/`((?:vault|note|write|daily|period|tasks|context|audit|skill)_[a-z_]+)`/g)) expect(tools.has(tool!), `${name} mentions unknown tool ${tool}`).toBe(true);
       for (const [, route] of text.matchAll(/routes? `([a-z]+)`/g)) expect(routes.has(route!), `${name} mentions unknown route ${route}`).toBe(true);
     }
   });

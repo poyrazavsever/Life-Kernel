@@ -74,10 +74,13 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   const write = [...protect, needs(SCOPE_WRITE)];
 
   app.get("/v1/vaults", ...read, (_req, res) => res.json(kernel.listVaults()));
-  app.post("/v1/search", ...read, async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
+  app.post("/v1/search", ...read, async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false, { type: req.body.type, status: req.body.status })); } catch (e) { next(e); } });
   app.post("/v1/read", ...read, async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
   app.post("/v1/daily", ...read, async (req, res, next) => { try { res.json(await kernel.dailyNote(req.body.vaultId, req.body.date, req.body.route)); } catch (e) { next(e); } });
   app.post("/v1/context", ...read, async (req, res, next) => { try { res.json(await kernel.contextBundle(req.body.vaultId, req.body)); } catch (e) { next(e); } });
+  app.post("/v1/period", ...read, async (req, res, next) => { try { res.json(await kernel.periodNote(req.body.vaultId, { route: req.body.route, period: req.body.period, date: req.body.date })); } catch (e) { next(e); } });
+  app.post("/v1/notes", ...read, async (req, res, next) => { try { res.json(await kernel.listNotes(req.body.vaultId, req.body)); } catch (e) { next(e); } });
+  app.post("/v1/tasks", ...read, async (req, res, next) => { try { res.json(await kernel.openTasks(req.body ?? {})); } catch (e) { next(e); } });
   app.post("/v1/backlinks", ...read, async (req, res, next) => { try { res.json(await kernel.backlinks(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false, req.body.limit)); } catch (e) { next(e); } });
   app.post("/v1/validate", ...read, async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });
   app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });

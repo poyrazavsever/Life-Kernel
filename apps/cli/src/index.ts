@@ -37,11 +37,17 @@ ${content}
   if (command === "vaults") return output(kernel.listVaults());
   if (command === "search") return output(await kernel.search(args.join(" ")));
   if (command === "read") return output(await kernel.readNote(args[0] ?? "", args[1] ?? ""));
+  if (command === "list") return output(await kernel.listNotes(args[0] ?? "", { ...(args[1] ? { type: args[1] } : {}), ...(args[2] ? { status: args[2] } : {}) }));
+  if (command === "tasks") return output(await kernel.openTasks(args[0] ? { vaultId: args[0] } : {}));
+  if (command === "migrate") {
+    if (!args[0]) throw new Error("Usage: lifekernel migrate <vaultId> [--apply]");
+    return output(await kernel.migrate(args[0], { apply: args.includes("--apply") }));
+  }
   if (command === "preview" || command === "apply") {
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|preview|apply> [...args]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|preview|apply|migrate> [...args]\n");
   process.exitCode = 1;
 }
 
