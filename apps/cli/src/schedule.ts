@@ -36,11 +36,13 @@ export function schedulePlan(platform: NodeJS.Platform, paths: SchedulePaths, ev
   if (!Number.isInteger(everyMinutes) || everyMinutes < 1 || everyMinutes > 60) throw new Error("--every must be between 1 and 60 minutes.");
   const lastTick = join(paths.stateDir, "last-tick.json");
   if (platform === "win32") {
-    // A wrapper script keeps the task command short and free of nested quoting.
+    // A wrapper script keeps the task command short and free of nested quoting. The file is UTF-8, but Task
+    // Scheduler runs it under the OEM code page (857 on Turkish Windows), which would garble a path such as
+    // C:\Yazılım; chcp 65001 makes cmd.exe read the paths as written.
     const script = join(paths.stateDir, "lifekernel-tick.cmd");
     return {
       platform,
-      files: [{ path: script, content: `@echo off\r\n"${paths.node}" "${paths.cli}" tick --config "${paths.config}" > "${lastTick}" 2>&1\r\n` }],
+      files: [{ path: script, content: `@echo off\r\nchcp 65001 >nul\r\n"${paths.node}" "${paths.cli}" tick --config "${paths.config}" > "${lastTick}" 2>&1\r\n` }],
       install: [{ argv: ["schtasks", "/Create", "/TN", TASK, "/SC", "MINUTE", "/MO", String(everyMinutes), "/TR", `"\\"${script}\\""`, "/F"], verbatim: true }],
       uninstall: [{ argv: ["schtasks", "/Delete", "/TN", TASK, "/F"], allowFailure: true }],
       status: { argv: ["schtasks", "/Query", "/TN", TASK, "/FO", "LIST"] }
