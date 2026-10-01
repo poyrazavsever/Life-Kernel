@@ -40,6 +40,34 @@ Life Kernel includes a small single-user OAuth 2.1 authorization server. It supp
    curl https://memory.example.com/.well-known/oauth-protected-resource/mcp
    ```
 
+## Run it from your own computer with a Cloudflare Tunnel
+
+You do not need a server to try remote mode. A [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) publishes a port on your computer under a hostname in a domain you manage on Cloudflare, with HTTPS, and without opening anything on your router. The computer has to be on while ChatGPT or Claude.ai use it.
+
+1. Install `cloudflared` and sign in: `cloudflared tunnel login`.
+2. Create the tunnel and its DNS record: `cloudflared tunnel create lifekernel`, then `cloudflared tunnel route dns lifekernel lifekernel.example.com`.
+3. Point it at the server in `~/.cloudflared/config.yml`:
+
+   ```yaml
+   tunnel: <the tunnel ID that create printed>
+   credentials-file: <the path create printed>
+   ingress:
+     - hostname: lifekernel.example.com
+       service: http://127.0.0.1:8787
+     - service: http_status:404
+   ```
+4. Start the server with `LIFEKERNEL_PUBLIC_URL=https://lifekernel.example.com` and `LIFEKERNEL_OWNER_SECRET` set (`npm run dev:http`), then run the tunnel with `cloudflared tunnel run lifekernel`.
+
+Do not put Cloudflare Access in front of the hostname: ChatGPT and Claude.ai cannot sign in to it, and Life Kernel's own OAuth sign-in is the gate. Try it on a test vault first, not on the notes you care about.
+
+## Check it before you connect
+
+```bash
+npm run cli -- check-remote https://lifekernel.example.com
+```
+
+It makes the requests ChatGPT and Claude.ai make before a user signs in: HTTPS, `/health`, the 401 that points to the resource metadata, the OAuth metadata (code with PKCE S256, refresh tokens, dynamic registration), a registration with each product's callback URL, and the consent page. It needs no credentials. Each run registers two throwaway clients, which expire on their own. A failing line says what to fix.
+
 ## Connect
 
 The MCP URL is `https://memory.example.com/mcp`.

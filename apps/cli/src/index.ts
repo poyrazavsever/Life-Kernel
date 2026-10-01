@@ -5,6 +5,7 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { briefAgenda, BriefsSchema, capture, createAgentToken, defaultCreateMessage, prepareBrief, formatToday, grantScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
+import { checkRemote } from "./remote-check.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 import { splitVaultArg } from "./vault-arg.js";
 
@@ -40,6 +41,15 @@ async function main() {
     process.stdout.write(`# ${file}
 ${content}
 `);
+    return;
+  }
+  if (command === "check-remote") {
+    if (!args[0]) throw new Error("Usage: lifekernel check-remote <https://your-host>");
+    const results = await checkRemote(args[0]);
+    for (const result of results) process.stdout.write(`${result.pass ? "PASS" : "FAIL"}  ${result.description}${result.detail && !result.pass ? `
+      ${result.detail}` : ""}
+`);
+    process.exitCode = results.every((result) => result.pass) ? 0 : 1;
     return;
   }
   await loadEnvBeside(configPath);
@@ -147,7 +157,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights|brief> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|check-remote|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights|brief> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 
