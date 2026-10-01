@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { createTransport } from "nodemailer";
 import { z } from "zod";
 import type { NudgeAction } from "./actions.js";
 import { RITUAL_IDS, type RitualId } from "./rituals.js";
@@ -58,6 +57,8 @@ const defaultRun: ChannelDeps["run"] = (command, args, env) => new Promise((reso
 });
 
 const defaultSendMail: ChannelDeps["sendMail"] = async (smtpUrl, mail) => {
+  // nodemailer is only needed by the email channel, so it is loaded on the first email.
+  const { createTransport } = await import("nodemailer");
   const url = new URL(smtpUrl);
   const secure = url.protocol === "smtps:";
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
