@@ -33,7 +33,7 @@ Append the printed block to `~/.codex/config.toml` and restart Codex.
 
 ## First conversation
 
-Say: "Set up my Life Kernel vault." The agent calls `skill_get` for `onboarding` and interviews you in your own language. Each evening say: "Let's do the circle." Once a week, after the circle, say: "Let's do the weekly review."
+Say: "Set up my Life Kernel vault." The agent calls `skill_get` for `onboarding` and interviews you in your own language, including when you want each ritual. Each morning say: "Let's plan the day." Each evening say: "Let's do the circle." Once a week, after the circle, say: "Let's do the weekly review." Monthly and quarterly reviews work the same way. When a ritual is due, any connected agent mentions it once at the start of a conversation.
 
 If a client does not pick the behavior up on its own, add one line to its instruction file (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, or your Claude Desktop project instructions): "For planning, daily circles, and reviews, use the lifekernel MCP server and call `skill_get` first."
 

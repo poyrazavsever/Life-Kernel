@@ -130,6 +130,8 @@ Unknown values stay blank. The agent never guesses a score.
 
 **Goal:** the server knows the user's rituals, whether each one happened, and what it should cover. The engine is deterministic and needs no model and no network.
 
+**Status:** done. Weekly, monthly, and quarterly schedules use separate `_day` and `_time` keys (for example `weekly_review_day: "sun"`, `weekly_review_time: "20:00"`) so each is a plain Obsidian property. A day before the vault's first daily note is never counted as missed, so a new user starts with a clean slate.
+
 ### 2.1 Ritual definitions live in the vault
 
 The user's chosen rhythm lives in `system/Method.md` frontmatter, written during onboarding through `set_frontmatter`:

@@ -29,6 +29,8 @@ Authenticated endpoints:
 - `POST /v1/period`
 - `POST /v1/notes`
 - `POST /v1/tasks`
+- `POST /v1/rituals/status`
+- `POST /v1/rituals/agenda`
 - `POST /v1/context`
 - `POST /v1/backlinks`
 - `POST /v1/validate`
@@ -60,9 +62,28 @@ A route with `period` (`day`, `week`, `month`, or `quarter`) keeps one note per 
 
 `tasks_open` (MCP) or `POST /v1/tasks` collects open (`- [ ]`) and in-progress (`- [/]`) checklist items written in Obsidian Tasks format: due `📅`, scheduled `⏳`, start `🛫`, priority `🔺⏫🔼🔽⏬`, recurrence `🔁`. Results are sorted by due date, then priority, and carry the note path, line, and hash. `dueBy` keeps tasks due on or before a date; `includeUndated: false` drops tasks without a due date.
 
+## Rituals
+
+`ritual_status` (MCP) or `POST /v1/rituals/status` reports each ritual (`morning-plan`, `daily-circle`, `weekly-review`, `monthly-review`, `quarterly-review`) as `not-scheduled`, `upcoming`, `due`, `overdue`, `done`, or `skipped`, with `dueAt` in the configured zone, `lastDone`, the daily `streak`, and `missed` days or periods. Days before the vault's first daily note never count as missed.
+
+- The schedule is the method note's frontmatter (`system/Method.md`, or the vault's `methodNote`); see [vault specification](vault-spec.md#rhythm). A malformed value is reported in that ritual's `error` instead of failing the call.
+- A daily ritual is complete when today's daily note has `morning_plan` or `circle` set to `done` or `skipped`. It is `due` for two hours after its time, then `overdue`.
+- A review is complete when its period note has `status: complete` or `skipped`. It is `due` on its day and `overdue` after it until the period ends.
+- A daily note the agent may not read counts as not done; its fields are never returned.
+
+`ritual_agenda` (MCP) or `POST /v1/rituals/agenda` takes `ritual` and an optional `date` and returns what the ritual should cover, each item with its source note:
+
+| Ritual | Agenda |
+| --- | --- |
+| `morning-plan` | yesterday's focus and open loops, the plan's focus for today, overdue and due tasks, today's fixed commitments from Availability |
+| `daily-circle` | today's "Plan for today", overdue and due tasks, the plan's "This week", and `catchUp` when yesterday has no circle |
+| `weekly-review` | the week's days with energy, focus, and circle fields and their totals; completed and overdue tasks; active projects untouched all week; the week's decisions; last week's commitments; stated and observed capacity |
+| `monthly-review` | totals for the month, active goals with the number of linked active projects, and the month's weekly reviews |
+| `quarterly-review` | totals for the quarter, goals, the quarter's monthly reviews, and active areas |
+
 ## Session context
 
-`context_bundle` (MCP) or `POST /v1/context` returns the minimum context for a session in one call: the vault's bundle notes, today's daily note, and the most recent earlier daily notes, within `maxChars` (default 24000). Notes that are missing, `restricted` (unless requested), `none`, or over budget are listed under `skipped` with a reason. Each note carries the hash of the full note, so a truncated read can still be followed by a safe write.
+`context_bundle` (MCP) or `POST /v1/context` returns the minimum context for a session in one call: the vault's bundle notes, today's daily note, and the most recent earlier daily notes, within `maxChars` (default 24000). Notes that are missing, `restricted` (unless requested), `none`, or over budget are listed under `skipped` with a reason. Each note carries the hash of the full note, so a truncated read can still be followed by a safe write. When the bundle is for today, it also carries `rituals`, the same report `ritual_status` returns.
 
 The default bundle is `AGENTS.md`, `system/AI Context.md`, `system/Method.md`, `state/Current State.md`, `profile/Profile.md`, `schedule/Capacity.md`, and `schedule/Near-Term Plan.md`. A vault can override it with a `bundle` array of relative paths in its config entry.
 

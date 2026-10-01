@@ -36,7 +36,8 @@ flowchart LR
 - **Agent-ready:** connect through MCP over stdio or authenticated Streamable HTTP.
 - **Source-backed:** search results include file, line, and SHA-256 provenance.
 - **Controlled writes:** routes, previews, request IDs, expected hashes, and audit events guard mutations.
-- **Portable behavior:** skills define onboarding, reflection, review, and project-memory workflows.
+- **Portable behavior:** skills define onboarding, the morning plan, the daily circle, weekly, monthly, and quarterly reviews, and project memory.
+- **Rituals that keep their rhythm:** the server knows when each ritual is due and what it should cover, so every connected agent can offer it at the right time.
 
 ## Quick start
 
@@ -76,6 +77,7 @@ The HTTP server exposes `/mcp` and a small REST surface under `/v1`. Continue wi
 - fetch a bounded session context bundle and find backlinks;
 - look up the single daily, weekly, monthly, or quarterly note for a date;
 - list notes by type, status, or area, and collect open tasks by due date;
+- see which rituals (morning plan, daily circle, weekly, monthly, and quarterly reviews) are due, and get each one's agenda;
 - preview a routed create, append, section update, or frontmatter change;
 - apply the exact request idempotently;
 - validate required frontmatter and inspect recent audit events.

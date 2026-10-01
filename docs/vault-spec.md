@@ -41,3 +41,18 @@ Daily notes carry optional frontmatter that the daily circle fills only when the
 Tasks are checklist items in their project or area note, in Obsidian Tasks format: `- [ ] Draft pricing page 📅 2026-10-04 ⏫`. `- [x]` is done, `- [-]` cancelled, `- [/]` in progress.
 
 Agents change status, dates, and next actions with `set_frontmatter`, limited to the keys each route lists under `fields`. A vault made with an older layout is updated with `lifekernel migrate <vaultId>` (a report) and `lifekernel migrate <vaultId> --apply`.
+
+## Rhythm
+
+The method note (`system/Method.md`) holds the user's ritual schedule in frontmatter. Onboarding writes it with `set_frontmatter` on route `method`; a blank value turns a ritual off.
+
+| Keys | Values |
+| --- | --- |
+| `morning_plan_time`, `daily_circle_time` | 24-hour `HH:MM` |
+| `morning_plan_days`, `daily_circle_days` | blank or `daily` (every day), `weekdays`, `weekends`, `mon,wed`, `mon-fri` |
+| `weekly_review_day`, `weekly_review_time` | a weekday (default `sun`), `HH:MM` |
+| `monthly_review_day`, `monthly_review_time` | a day number (clamped to the month), `last` (default), `first-mon`, or `last-sun`; `HH:MM` |
+| `quarterly_review_day`, `quarterly_review_time` | as monthly, applied to the quarter's last month |
+| `quiet_hours` | `HH:MM-HH:MM`, for example `23:00-08:00` |
+
+Daily notes record completion in `morning_plan` and `circle` (`done` or `skipped`). Weekly, monthly, and quarterly review notes (`reviews/2026-W40.md`, `reviews/2026-10.md`, `reviews/2026-Q4.md`) are complete when `status` is `complete`, or `skipped` with the reason in the note. The daily template has a "Plan for today" section for the morning plan.

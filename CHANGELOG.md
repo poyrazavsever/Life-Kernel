@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Ritual engine (roadmap phase 2).
+
+- `ritual_status` tool and `POST /v1/rituals/status`: each ritual is not scheduled, upcoming, due, overdue, done, or skipped, with its due time, streak, last completion, and recently missed days. The schedule lives in the method note's frontmatter; days before the vault's first daily note are never counted as missed.
+- `ritual_agenda` tool and `POST /v1/rituals/agenda`: what the morning plan, daily circle, and weekly, monthly, and quarterly reviews should cover, assembled from the vault with sources and without a model.
+- `context_bundle` includes ritual status for today. Server instructions tell agents to mention a due or missed ritual once and never nag.
+- New skills `morning-plan`, `monthly-review`, and `quarterly-review`. The daily circle offers a short catch-up for a missed day; reviews mark themselves complete or skipped. Onboarding records the rhythm.
+- Starter vault: ritual schedule keys in `system/Method.md`, a "Plan for today" section in the daily template, monthly and quarterly review templates, and `monthly` and `quarterly` routes. `lifekernel migrate` adds these to older vaults. New CLI commands `rituals` and `agenda`.
+
 Planning data (roadmap phase 1).
 
 - `set_frontmatter` operation and `fields` on `create`, limited to each route's `fields` allowlist; protected keys can never be listed. Decisions can now be accepted, goals finished, and next actions set.
