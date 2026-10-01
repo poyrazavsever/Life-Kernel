@@ -166,5 +166,17 @@
         }
       }
     }
-  ]
+  ],
+  "notifications": {
+    "enabled": false,
+    "locale": "en",
+    "followUpAfterMinutes": 90,
+    "channels": [
+      {
+        "type": "ntfy",
+        "content": "minimal",
+        "openUrl": "https://claude.ai/new?q={prompt}"
+      }
+    ]
+  }
 }
