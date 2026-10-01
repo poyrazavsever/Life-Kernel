@@ -18,6 +18,7 @@ export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
 export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
+export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
 export { RITUAL_FIELDS, RITUAL_IDS, type QuietHours, type RitualId, type RitualState, type RitualStatus } from "./rituals.js";
 export { ChannelSchema, createChannel, desktopCommand, type Channel, type ChannelConfig, type ChannelDeps, type NudgeMessage } from "./channels.js";
 export { decideNudges, loadNudgeState, notificationsVault, NotificationsSchema, nudgeMessage, pauseNudges, sendTestNotification, skipRitual, snoozeRitual, tick, type NotificationsConfig, type NudgeState, type TickResult } from "./nudges.js";
@@ -225,6 +226,15 @@ function noteTitle(content: string, path: string): string {
   return content.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] ?? basename(path, extname(path));
 }
 
+/** The route that holds daily notes: the one typed `daily`, or else the only route that keeps one note per day. */
+function dailyRouteOf(vault: VaultConfig): [string, RouteConfig] | undefined {
+  const entries = Object.entries(vault.routes);
+  const typed = entries.filter(([, route]) => route.type === "daily");
+  if (typed.length > 0) return typed[0];
+  const perDay = entries.filter(([, route]) => routePeriod(route) === "day");
+  return perDay.length === 1 ? perDay[0] : undefined;
+}
+
 /** The period of a route, if it keeps one note per period. Older configs mark daily notes only by type. */
 function routePeriod(route: RouteConfig): Period | undefined {
   return route.period ?? (route.type === "daily" ? "day" : undefined);
@@ -418,7 +428,12 @@ export class LifeKernel {
     const vault = this.vault(vaultId);
     const date = options.date ?? this.today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
-    const candidates = Object.entries(vault.routes).filter(([name, route]) => routePeriod(route) && (!options.route || name === options.route) && (!options.period || routePeriod(route) === options.period));
+    let candidates = Object.entries(vault.routes).filter(([name, route]) => routePeriod(route) && (!options.route || name === options.route) && (!options.period || routePeriod(route) === options.period));
+    // Other routes may keep one note per day too (an inbox, for example); the daily note is the one typed daily.
+    if (options.period === "day" && !options.route && candidates.length > 1) {
+      const daily = candidates.filter(([, route]) => route.type === "daily");
+      if (daily.length === 1) candidates = daily;
+    }
     const described = options.period === "day" ? "daily" : options.period ? `${options.period}ly` : "periodic";
     if (candidates.length === 0) throw new Error(`Vault ${vault.id} has no ${described} route${options.route ? ` named ${options.route}` : ""}.`);
     if (candidates.length > 1) throw new Error(`Several ${described} routes exist; pass route.`);
@@ -465,7 +480,7 @@ export class LifeKernel {
 
     const outcome = (value: unknown): Outcome => value === "done" || value === "skipped" ? value : null;
     const dailyCache = new Map<string, Record<string, unknown> | null>();
-    const dailyRoute = Object.values(vault.routes).find((route) => routePeriod(route) === "day");
+    const dailyRoute = dailyRouteOf(vault)?.[1];
     let firstActiveDate: string | null = null;
     if (dailyRoute) {
       const names = await readdir(resolve(vault.path, dailyRoute.folder)).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return [] as string[]; throw error; });
@@ -584,7 +599,7 @@ export class LifeKernel {
     let remaining = Math.min(Math.max(options.maxChars ?? 24000, 1000), 200000);
     const paths = [...(vault.bundle ?? DEFAULT_BUNDLE)];
 
-    const dailyRoute = Object.values(vault.routes).find((route) => routePeriod(route) === "day");
+    const dailyRoute = dailyRouteOf(vault)?.[1];
     if (dailyRoute) {
       let names: string[] = [];
       try { names = await readdir(resolve(vault.path, dailyRoute.folder)); } catch (error: unknown) {

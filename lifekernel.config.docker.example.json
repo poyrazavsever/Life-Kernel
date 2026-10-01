@@ -118,7 +118,8 @@
           "policy": "auto",
           "fields": [
             "status"
-          ]
+          ],
+          "period": "day"
         },
         "state": {
           "folder": "state",

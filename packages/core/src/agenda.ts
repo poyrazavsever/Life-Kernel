@@ -1,3 +1,4 @@
+import { inboxItems } from "./capture.js";
 import { readFrontmatter } from "./frontmatter.js";
 import type { LifeKernel } from "./index.js";
 import { periodKey, periodRange, type Period } from "./periods.js";
@@ -6,7 +7,7 @@ import { readSection } from "./sections.js";
 import { parseTasks, type Task } from "./tasks.js";
 import { addDays, weekday } from "./time.js";
 
-type Kernel = Pick<LifeKernel, "readNote" | "dailyNote" | "periodNote" | "listNotes" | "openTasks">;
+type Kernel = Pick<LifeKernel, "config" | "readNote" | "dailyNote" | "periodNote" | "listNotes" | "openTasks">;
 
 /** A section of a note, with the note it came from so the agent can cite it. */
 export interface SourcedText { source: string; text: string }
@@ -153,7 +154,9 @@ export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: Ritua
     const tasks = { overdue: due.filter((task) => task.due! < date), dueToday: due.filter((task) => task.due === date) };
     const previous = await daySummary(kernel, vaultId, yesterday);
     const today = await daily(kernel, vaultId, date);
-    const common = { ritual, date, tasks, todayNote: today ? { path: today.path, sha256: today.sha256 } : null };
+    // Captured items waiting for triage; the circle offers to file them.
+    const inbox = await inboxItems(kernel, vaultId);
+    const common = { ritual, date, tasks, todayNote: today ? { path: today.path, sha256: today.sha256 } : null, inbox: { count: inbox.reduce((sum, note) => sum + note.items.length, 0), notes: inbox } };
     if (ritual === "morning-plan") {
       const yesterdayNote = previous.source;
       return {
