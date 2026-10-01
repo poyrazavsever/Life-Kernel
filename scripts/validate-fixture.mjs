@@ -70,6 +70,12 @@ try {
   if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
   const today = run("today", "--json");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today.date) || today.focus !== null) throw new Error(`today looks wrong for a fresh vault: ${JSON.stringify(today)}`);
+  try {
+    run("brief", "morning-plan");
+    throw new Error("brief must refuse while briefs are off");
+  } catch (error) {
+    if (!String(error.stderr ?? error.message).includes("Briefs are off")) throw error;
+  }
   const insights = run("insights", "week", "--json");
   if (insights.period.kind !== "week" || insights.days.recorded !== 0 || insights.observations.length !== 0) throw new Error(`a fresh vault should have empty insights: ${JSON.stringify(insights)}`);
   const broken = await brokenLinks(join(work, "vaults/personal"));

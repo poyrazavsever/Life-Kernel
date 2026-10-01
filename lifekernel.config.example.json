@@ -192,6 +192,15 @@
       {
         "type": "desktop"
       }
-    ]
+    ],
+    "briefs": {
+      "enabled": false,
+      "rituals": [
+        "morning-plan"
+      ],
+      "model": "claude-opus-5-5",
+      "effort": "low",
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    }
   }
 }

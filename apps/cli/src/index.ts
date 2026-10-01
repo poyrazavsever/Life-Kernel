@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { capture, createAgentToken, formatToday, grantScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
+import { briefAgenda, BriefsSchema, capture, createAgentToken, defaultCreateMessage, prepareBrief, formatToday, grantScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 
@@ -78,6 +78,17 @@ ${content}
     process.stdout.write(`${insights.period.key} (${insights.period.start} to ${insights.period.through})\n${insights.observations.map((line) => `- ${line}`).join("\n") || "- Not enough recorded days for observations yet."}\n`);
     return;
   }
+  if (command === "brief") {
+    // Previews a brief on demand. This sends the ritual's agenda to the Claude API, so it needs briefs enabled.
+    const ritual = ritualArg(positional()[0] ?? "morning-plan");
+    const briefs = kernel.config.notifications?.briefs;
+    if (!briefs?.enabled) throw new Error("Briefs are off. Set notifications.briefs.enabled to true to send agendas to the Claude API.");
+    const vaultId = notificationsVault(kernel);
+    const result = await prepareBrief(defaultCreateMessage(BriefsSchema.parse(briefs)), briefs, ritual, briefAgenda(await kernel.ritualAgenda(vaultId, ritual)), kernel.config.notifications!.locale);
+    if (!result.ok) throw new Error(result.error);
+    process.stdout.write(`${result.text}\n`);
+    return;
+  }
   if (command === "undo") {
     if (!args[0] || args[0].startsWith("--")) throw new Error("Usage: lifekernel undo <requestId> [--apply]");
     return output(await kernel.undo(args[0], { apply: args.includes("--apply") }));
@@ -123,7 +134,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights|brief> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 
