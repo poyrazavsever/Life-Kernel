@@ -2,6 +2,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { actionLink, actionSecret, verifyAction, type NudgeAction } from "./actions.js";
+import { BriefsSchema, briefAgenda, defaultCreateMessage, prepareBrief, type CreateMessage } from "./briefs.js";
 import { ChannelSchema, createChannel, defaultDeps, type Channel, type ChannelDeps, type NudgeMessage } from "./channels.js";
 import { replaceFile, withFileLock } from "./files.js";
 import type { LifeKernel, RitualReport, WriteContext } from "./index.js";
@@ -17,7 +18,9 @@ export const NotificationsSchema = z.object({
   followUpAfterMinutes: z.number().int().min(0).max(24 * 60).default(90),
   /** Public https origin of the HTTP server; when set, ntfy reminders carry signed snooze and skip buttons. */
   actionBaseUrl: z.string().url().refine((value) => value.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(value), "actionBaseUrl must be https, or http on localhost.").optional(),
-  channels: z.array(ChannelSchema).default([])
+  channels: z.array(ChannelSchema).default([]),
+  /** Optional model-written briefs for agenda channels; off by default. */
+  briefs: BriefsSchema.optional()
 });
 export type NotificationsConfig = z.infer<typeof NotificationsSchema>;
 type Locale = NotificationsConfig["locale"];
@@ -203,7 +206,7 @@ export interface TickResult {
   dryRun: boolean;
   at: string;
   vaultId?: string;
-  sent: Array<Nudge & { channels: Array<{ type: string; ok: boolean; error?: string }> }>;
+  sent: Array<Nudge & { channels: Array<{ type: string; ok: boolean; error?: string }>; brief?: { ok: boolean; model?: string; error?: string } }>;
   held: HeldNudge[];
   error?: string;
 }
@@ -213,7 +216,7 @@ export interface TickResult {
  * schedulers: a lock serializes checks and the state file remembers what was already sent.
  * The audit log records which reminders went out on which channels, never their text.
  */
-export async function tick(kernel: LifeKernel, options: { at?: Date; dryRun?: boolean; channels?: Channel[]; deps?: ChannelDeps } = {}): Promise<TickResult> {
+export async function tick(kernel: LifeKernel, options: { at?: Date; dryRun?: boolean; channels?: Channel[]; deps?: ChannelDeps; createMessage?: CreateMessage } = {}): Promise<TickResult> {
   const now = options.at ?? new Date();
   const dryRun = options.dryRun ?? false;
   const config = kernel.config.notifications;
@@ -235,8 +238,18 @@ export async function tick(kernel: LifeKernel, options: { at?: Date; dryRun?: bo
     for (const nudge of nudges) {
       const targets = channels.filter((channel) => !channel.config.rituals || channel.config.rituals.includes(nudge.ritual));
       let line: string | undefined;
+      let brief: TickResult["sent"][number]["brief"];
       if (targets.some((channel) => channel.config.content === "agenda")) {
-        line = agendaLine(nudge.ritual, await kernel.ritualAgenda(vaultId, nudge.ritual, { date: report.date }) as Record<string, unknown>, config.locale) || undefined;
+        const agenda = await kernel.ritualAgenda(vaultId, nudge.ritual, { date: report.date });
+        line = agendaLine(nudge.ritual, agenda as Record<string, unknown>, config.locale) || undefined;
+        // A brief is written once per reminder and only when the owner turned briefs on; on any failure the
+        // reminder keeps its usual agenda line.
+        const briefs = config.briefs;
+        if (briefs?.enabled && briefs.rituals.includes(nudge.ritual) && nudge.kind === "reminder" && !dryRun) {
+          const prepared = await prepareBrief(options.createMessage ?? defaultCreateMessage(briefs), briefs, nudge.ritual, briefAgenda(agenda), config.locale);
+          brief = prepared.ok ? { ok: true, model: prepared.model } : { ok: false, error: prepared.error };
+          if (prepared.ok) line = prepared.text;
+        }
       }
       const catchUp = nudge.ritual === "morning-plan" && nudge.kind === "reminder" && missedYesterday;
       const outcomes: TickResult["sent"][number]["channels"] = [];
@@ -254,14 +267,14 @@ export async function tick(kernel: LifeKernel, options: { at?: Date; dryRun?: bo
           outcomes.push({ type: channel.type, ok: false, error: error instanceof Error ? error.message : String(error) });
         }
       }
-      result.sent.push({ ...nudge, channels: outcomes });
+      result.sent.push({ ...nudge, channels: outcomes, ...(brief ? { brief } : {}) });
       if (dryRun) continue;
       // A reminder that reached no channel is retried on the next check.
       if (outcomes.some((outcome) => outcome.ok)) {
         const entry = state.sent[nudge.occurrence] ??= {};
         entry[nudge.kind === "reminder" ? "reminder" : "followUp"] = now.toISOString();
       }
-      await audit(kernel, { event: "nudge_sent", vaultId, ritual: nudge.ritual, occurrence: nudge.occurrence, kind: nudge.kind, channels: outcomes, at: now.toISOString() });
+      await audit(kernel, { event: "nudge_sent", vaultId, ritual: nudge.ritual, occurrence: nudge.occurrence, kind: nudge.kind, channels: outcomes, ...(brief ? { brief } : {}), at: now.toISOString() });
     }
     if (!dryRun) await saveNudgeState(kernel, state, now);
     return result;

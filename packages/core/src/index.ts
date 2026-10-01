@@ -22,6 +22,7 @@ export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tas
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
 export type { Insights, RitualConsistency } from "./insights.js";
+export { BriefsSchema, briefAgenda, defaultCreateMessage, prepareBrief, type BriefsConfig, type BriefResult, type CreateMessage } from "./briefs.js";
 export { createAgentToken, findAgentToken, grantScopes, grantsFromScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, type AgentToken, type VaultGrants } from "./access.js";
 export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
 export { actionLink, actionSecret, verifyAction, NUDGE_ACTIONS, type NudgeAction } from "./actions.js";
