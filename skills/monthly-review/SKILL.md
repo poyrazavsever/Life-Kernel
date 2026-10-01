@@ -10,7 +10,7 @@ Run only when the user starts it or accepts an offer you made because `ritual_st
 ## Gather
 
 1. Call `vault_list`, then `context_bundle` for the personal vault.
-2. Call `ritual_agenda` with `ritual: "monthly-review"`. It returns the month's dates, whether the monthly note exists, the month's energy, focus, and circle counts, each active goal with the number of active projects linked to it, and the month's weekly reviews with their status.
+2. Call `ritual_agenda` with `ritual: "monthly-review"`. It returns the month's dates, whether the monthly note exists, the month's energy, focus, and circle counts, each active goal with the number of active projects linked to it, the month's weekly reviews with their status, and `insights` for the month (energy, focus against capacity, ritual consistency, tasks carried for days).
 3. Read the completed weekly reviews and the goal notes that need a decision. Read only what you need.
 
 ## Think, then talk

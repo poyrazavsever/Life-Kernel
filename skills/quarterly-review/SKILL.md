@@ -10,7 +10,7 @@ Run only when the user starts it or accepts an offer you made because `ritual_st
 ## Gather
 
 1. Call `vault_list`, then `context_bundle` for the personal vault.
-2. Call `ritual_agenda` with `ritual: "quarterly-review"`. It returns the quarter's dates, whether the quarterly note exists, the quarter's energy, focus, and circle counts, active goals by horizon with their linked active projects, the quarter's monthly reviews, and the active areas.
+2. Call `ritual_agenda` with `ritual: "quarterly-review"`. It returns the quarter's dates, whether the quarterly note exists, the quarter's energy, focus, and circle counts, active goals by horizon with their linked active projects, the quarter's monthly reviews, the active areas, and `insights` for the quarter.
 3. Read the completed monthly reviews, `profile/Profile.md`, and the long-term goals. Read only what you need.
 
 ## Think, then talk
