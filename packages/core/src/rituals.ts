@@ -6,8 +6,8 @@ export type RitualId = (typeof RITUAL_IDS)[number];
 export type RitualState = "not-scheduled" | "upcoming" | "due" | "overdue" | "done" | "skipped";
 export type Outcome = "done" | "skipped" | null;
 
-interface DailyRitual { id: RitualId; kind: "daily"; timeKey: string; daysKey: string; field: string }
-interface PeriodRitual { id: RitualId; kind: "period"; period: Exclude<Period, "day">; dayKey: string; timeKey: string }
+export interface DailyRitual { id: RitualId; kind: "daily"; timeKey: string; daysKey: string; field: string }
+export interface PeriodRitual { id: RitualId; kind: "period"; period: Exclude<Period, "day">; dayKey: string; timeKey: string }
 export type RitualDefinition = DailyRitual | PeriodRitual;
 
 /** Daily rituals are marked on the daily note; reviews are complete when their period note's status says so. */
@@ -33,7 +33,7 @@ const DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "satu
 
 const text = (value: unknown) => value === undefined || value === null ? "" : String(value).trim().toLowerCase();
 
-function parseTime(value: unknown): string | null {
+export function parseTime(value: unknown): string | null {
   const raw = text(value);
   if (!raw) return null;
   const match = /^(\d{1,2}):(\d{2})$/.exec(raw);
@@ -48,7 +48,7 @@ function dayNumber(token: string): number {
 }
 
 /** Weekdays a daily ritual runs on: blank or "daily" is every day; also "weekdays", "weekends", "mon,wed", "mon-fri". */
-function parseDays(value: unknown): Set<number> {
+export function parseDays(value: unknown): Set<number> {
   const raw = text(value);
   if (!raw || raw === "daily" || raw === "every day") return new Set([1, 2, 3, 4, 5, 6, 7]);
   const days = new Set<number>();
@@ -63,13 +63,13 @@ function parseDays(value: unknown): Set<number> {
   return days;
 }
 
-type DayRule = { kind: "weekday"; weekday: number } | { kind: "date"; day: number } | { kind: "last" } | { kind: "nth"; which: "first" | "last"; weekday: number };
+export type DayRule = { kind: "weekday"; weekday: number } | { kind: "date"; day: number } | { kind: "last" } | { kind: "nth"; which: "first" | "last"; weekday: number };
 
 /**
  * When in the period a review falls. Weekly: a weekday (default sun). Monthly and quarterly (in the
  * quarter's last month): a day number, "last", "first-mon", or "last-sun" (default "last").
  */
-function parseDayRule(value: unknown, period: Exclude<Period, "day">): DayRule {
+export function parseDayRule(value: unknown, period: Exclude<Period, "day">): DayRule {
   const raw = text(value);
   if (period === "week") return { kind: "weekday", weekday: dayNumber(raw || "sun") };
   if (!raw || raw === "last") return { kind: "last" };
@@ -80,7 +80,7 @@ function parseDayRule(value: unknown, period: Exclude<Period, "day">): DayRule {
 }
 
 /** The scheduled date of a review within the period that contains `date`. */
-function scheduledDate(rule: DayRule, period: Exclude<Period, "day">, date: string): string {
+export function scheduledDate(rule: DayRule, period: Exclude<Period, "day">, date: string): string {
   const { start, end } = periodRange(period, date);
   if (rule.kind === "weekday") return addDays(start, rule.weekday - 1);
   const monthStart = period === "quarter" ? `${end.slice(0, 7)}-01` : start;

@@ -6,6 +6,8 @@ import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontm
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
 import { buildAgenda } from "./agenda.js";
 import { replaceFile, withFileLock } from "./files.js";
+import { ritualCalendar } from "./ics.js";
+import { NotificationsSchema } from "./nudges.js";
 import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
 import { replaceSection } from "./sections.js";
 import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
@@ -16,6 +18,8 @@ export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tas
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
 export { RITUAL_FIELDS, RITUAL_IDS, type QuietHours, type RitualId, type RitualState, type RitualStatus } from "./rituals.js";
+export { ChannelSchema, createChannel, desktopCommand, type Channel, type ChannelConfig, type ChannelDeps, type NudgeMessage } from "./channels.js";
+export { decideNudges, loadNudgeState, notificationsVault, NotificationsSchema, nudgeMessage, pauseNudges, sendTestNotification, skipRitual, snoozeRitual, tick, type NotificationsConfig, type NudgeState, type TickResult } from "./nudges.js";
 
 /** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
 export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
@@ -58,7 +62,9 @@ const ConfigSchema = z.object({
   version: z.literal(1),
   stateDir: z.string().default("./.lifekernel-data"),
   timezone: z.string().refine(isValidTimeZone, "Unknown IANA time zone.").default(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
-  vaults: z.array(VaultSchema).min(1)
+  vaults: z.array(VaultSchema).min(1),
+  /** Ritual reminders; absent means none are sent. */
+  notifications: NotificationsSchema.optional()
 });
 
 function FieldValueSchema() {
@@ -458,6 +464,14 @@ export class LifeKernel {
       }
     });
     return report;
+  }
+
+  /** The ritual schedule as an iCalendar feed: names and times only, never note content. */
+  async ritualCalendar(vaultId: string): Promise<string> {
+    const vault = this.vault(vaultId);
+    const method = readFrontmatter((await this.readNote(vault.id, vault.methodNote ?? "system/Method.md")).content) ?? {};
+    const now = this.now();
+    return ritualCalendar(method, { timeZone: this.config.timezone, vaultId: vault.id, today: localDate(this.config.timezone, now), now, locale: this.config.notifications?.locale ?? "en" });
   }
 
   /** What a ritual should cover on a date (default today), with sources. Reads only notes the agent may read. */
