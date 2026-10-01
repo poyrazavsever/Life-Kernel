@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LifeKernel, localDate, resolveMarkdownPath, type LifeKernelConfig } from "./index.js";
 
@@ -563,8 +563,144 @@ describe("layout migration", () => {
     expect((await kernel.recentAudit(5)).filter((event) => event.event === "vault_migrated")).toHaveLength(1);
   });
 
+  it("adds the ritual schedule keys, the morning section, and missing starter templates", async () => {
+    const { kernel, vault, root } = await layoutTwoVault();
+    await writeFile(join(vault, "_templates/Daily.md"), '---\r\nid: "{{id}}"\r\n---\r\n\r\n# {{date}}\r\n\r\n## Day summary\r\n', "utf8");
+    await mkdir(join(vault, "system"));
+    await writeFile(join(vault, "system/Method.md"), '---\nid: "m"\ndaily_circle_time: "21:00"\n---\n\n# Method\n\nThemed days.\n', "utf8");
+    const starter = join(root, "starter");
+    await mkdir(join(starter, "_templates"), { recursive: true });
+    await writeFile(join(starter, "_templates/Daily.md"), "starter daily", "utf8");
+    await writeFile(join(starter, "_templates/Monthly Review.md"), "monthly", "utf8");
+
+    const report = await kernel.migrate("test", { apply: true, starterDir: starter });
+    expect(report.changes).toEqual([
+      { path: "_templates/Daily.md", change: "add frontmatter fields energy, focus_hours, morning_plan, circle, circle_at; add section Plan for today" },
+      { path: "system/Method.md", change: "add frontmatter fields morning_plan_time, morning_plan_days, daily_circle_days, weekly_review_day, weekly_review_time, monthly_review_day, monthly_review_time, quarterly_review_day, quarterly_review_time, quiet_hours" },
+      { path: "_templates/Monthly Review.md", change: "add template" },
+      { path: ".lifekernel/vault.json", change: "layoutVersion 2 -> 3" }
+    ]);
+    const daily = await readFile(join(vault, "_templates/Daily.md"), "utf8");
+    expect(daily).toContain("# {{date}}\r\n\r\n## Plan for today\r\n\r\n## Day summary\r\n");
+    expect(daily.replaceAll("\r\n", "")).not.toContain("\n");
+    const method = await readFile(join(vault, "system/Method.md"), "utf8");
+    expect(method).toContain('daily_circle_time: "21:00"');
+    expect(method).toContain('quiet_hours: ""');
+    expect(method).toContain("Themed days.");
+    expect(await readFile(join(vault, "_templates/Monthly Review.md"), "utf8")).toBe("monthly");
+  });
+
   it("refuses folders that lifekernel init did not create", async () => {
     const { kernel } = await fixture();
     await expect(kernel.migrate("test")).rejects.toThrow(/not created by lifekernel init/);
+  });
+});
+
+describe("rituals", () => {
+  // Thursday 2026-10-01, 22:00 in Istanbul.
+  const at = new Date("2026-10-01T19:00:00Z");
+  const fm = (fields: string) => `---\nid: x\ntype: note\nstatus: active\narea: life\nprivacy: personal\nai_access: context\n${fields}---\n`;
+
+  async function ritualFixture() {
+    const f = await planningFixture();
+    f.config.timezone = "Europe/Istanbul";
+    const kernel = new LifeKernel(f.config, { now: () => at });
+    const file = (path: string, content: string) => mkdir(join(f.vault, dirname(path)), { recursive: true }).then(() => writeFile(join(f.vault, path), content, "utf8"));
+    await file("system/Method.md", fm('daily_circle_time: "21:30"\nmorning_plan_time: "08:30"\nmorning_plan_days: "weekdays"\nweekly_review_day: "sun"\nweekly_review_time: "20:00"\nquiet_hours: "23:00-08:00"\n') + "\n# Planning method\n");
+    await file("daily/2026-09-29.md", fm('energy: 2\nfocus_hours: 1.5\ncircle: "done"\n') + "\n# 2026-09-29\n");
+    await file("daily/2026-09-30.md", fm('energy: 4\nfocus_hours: 3\ncircle: "done"\nmorning_plan: "done"\n') + "\n# 2026-09-30\n\n## Open loops\n\nCall the bank.\n\n## Tomorrow's focus\n\nShip the pricing page.\n");
+    await file("daily/2026-10-01.md", fm('morning_plan: "done"\n') + "\n# 2026-10-01\n\n## Plan for today\n\nPricing page, then gym.\n");
+    await file("schedule/Availability.md", fm("") + "\n# Availability\n\n## Fixed commitments\n\n| Day | Time | Commitment |\n| --- | --- | --- |\n| Thu | 18:00 | Gym |\n| Weekdays | 09:00-17:00 | Work |\n| Sat | 10:00 | Market |\n\n## Flexible windows\n");
+    await file("schedule/Near-Term Plan.md", fm("") + "\n# Near-term plan\n\n## Focus for tomorrow\n\nPricing page.\n\n## This week\n\nLaunch beta.\n");
+    await file("schedule/Capacity.md", fm("") + "\n# Capacity\n\n## Stated capacity\n\n- Focused work hours per weekday: 4\n\n## Observed capacity\n");
+    await file("projects/launch.md", `---\nid: l\ntype: project\nstatus: active\narea: work\nupdated: "2026-09-29"\n---\n\n# Launch\n\n## Tasks\n\n- [ ] Pricing page 📅 2026-10-01\n- [ ] Old bug 📅 2026-09-25 ⏫\n- [x] Domain ✅ 2026-09-29\n`);
+    await file("projects/stale.md", `---\nid: s\ntype: project\nstatus: active\narea: work\nupdated: "2026-09-01"\n---\n\n# Stale\n`);
+    await file("goals/fit.md", `---\nid: g\ntype: goal\nstatus: active\nhorizon: short\n---\n\n# Get fit\n\n## Linked projects and areas\n\n- [[projects/launch]]\n`);
+    await file("goals/lonely.md", `---\nid: g2\ntype: goal\nstatus: active\nhorizon: long\n---\n\n# Write a book\n\n## Linked projects and areas\n\n- [[projects/stale-idea]]\n`);
+    return { ...f, kernel };
+  }
+
+  it("reports each ritual from the method schedule and the daily fields", async () => {
+    const { kernel } = await ritualFixture();
+    const report = await kernel.ritualStatus("test");
+    expect(report).toMatchObject({ now: "2026-10-01T22:00:00+03:00", date: "2026-10-01", timeZone: "Europe/Istanbul", quietHours: { start: "23:00", end: "08:00" } });
+    const byId = Object.fromEntries(report.rituals.map((status) => [status.id, status]));
+    expect(byId["daily-circle"]).toMatchObject({ state: "due", streak: 2, lastDone: "2026-09-30", dueAt: "2026-10-01T21:30:00+03:00" });
+    expect(byId["morning-plan"]).toMatchObject({ state: "done", streak: 2 });
+    // The vault's first daily note is 2026-09-29, so the week before does not count as missed.
+    expect(byId["weekly-review"]).toEqual({ id: "weekly-review", state: "upcoming", period: "2026-W40", dueAt: "2026-10-04T20:00:00+03:00", schedule: "sun 20:00" });
+    expect(byId["monthly-review"]).toEqual({ id: "monthly-review", state: "not-scheduled" });
+  });
+
+  it("marks a weekly review complete through its status, and includes rituals in today's context bundle", async () => {
+    const { kernel } = await ritualFixture();
+    await kernel.applyWrite(write({ requestId: "ritual-0001", operation: "create", route: "review", title: "Week 40", body: "x", sourceDate: "2026-10-01" }));
+    const note = await kernel.periodNote("test", { period: "week" });
+    expect((await kernel.ritualStatus("test")).rituals.find((status) => status.id === "weekly-review")).toMatchObject({ state: "upcoming" });
+    await kernel.applyWrite(write({ requestId: "ritual-0002", operation: "set_frontmatter", route: "review", targetPath: note.path, expectedSha256: note.exists ? note.sha256 : "", fields: { status: "complete" }, sourceDate: "2026-10-01" }));
+    expect((await kernel.ritualStatus("test")).rituals.find((status) => status.id === "weekly-review")).toMatchObject({ state: "done", lastDone: "2026-W40" });
+    expect((await kernel.contextBundle("test")).rituals?.rituals).toHaveLength(5);
+    expect((await kernel.contextBundle("test", { date: "2026-09-30" })).rituals).toBeUndefined();
+  });
+
+  it("reports an unreadable method note instead of failing", async () => {
+    const { kernel, vault } = await ritualFixture();
+    await writeFile(join(vault, "system/Method.md"), fm("").replace("ai_access: context", "ai_access: none") + "\n# Method\n", "utf8");
+    const report = await kernel.ritualStatus("test");
+    expect(report.error).toMatch(/excluded from AI access/);
+    expect(report.rituals.every((status) => status.state === "not-scheduled")).toBe(true);
+  });
+
+  it("prepares the morning plan from yesterday, the plan, today's commitments, and due tasks", async () => {
+    const { kernel } = await ritualFixture();
+    const agenda = await kernel.ritualAgenda("test", "morning-plan") as Record<string, unknown>;
+    expect(agenda).toMatchObject({
+      date: "2026-10-01",
+      yesterday: { date: "2026-09-30", circle: "done" },
+      yesterdayFocus: { source: "daily/2026-09-30.md", text: "Ship the pricing page." },
+      openLoops: { source: "daily/2026-09-30.md", text: "Call the bank." },
+      plannedFocus: { source: "schedule/Near-Term Plan.md", text: "Pricing page." },
+      tasks: { overdue: [expect.objectContaining({ text: "Old bug", path: "projects/launch.md" })], dueToday: [expect.objectContaining({ text: "Pricing page" })] }
+    });
+    expect((agenda.commitments as Array<{ commitment: string }>).map((row) => row.commitment)).toEqual(["Gym", "Work"]);
+  });
+
+  it("prepares the daily circle with today's plan and a catch-up for a missed day", async () => {
+    const { kernel } = await ritualFixture();
+    expect(await kernel.ritualAgenda("test", "daily-circle")).toMatchObject({ planForToday: "Pricing page, then gym.", catchUp: null, thisWeek: { text: "Launch beta." } });
+    expect(await kernel.ritualAgenda("test", "daily-circle", { date: "2026-09-29" })).toMatchObject({ catchUp: { date: "2026-09-28", noteExists: false }, planForToday: null });
+  });
+
+  it("prepares the weekly review from the week's fields, tasks, and projects", async () => {
+    const { kernel } = await ritualFixture();
+    const agenda = await kernel.ritualAgenda("test", "weekly-review") as Record<string, unknown>;
+    expect(agenda).toMatchObject({
+      period: { key: "2026-W40", start: "2026-09-28", end: "2026-10-04" },
+      reviewNote: { key: "2026-W40", path: "reviews/2026-W40.md", exists: false },
+      stats: { days: 7, daysRecorded: 3, circlesDone: 2, averageEnergy: 3, focusHours: 4.5 },
+      completedTasks: [expect.objectContaining({ text: "Domain", done: "2026-09-29" })],
+      stalledProjects: [{ path: "projects/stale.md", title: "Stale", updated: "2026-09-01" }],
+      statedCapacity: { text: "- Focused work hours per weekday: 4" },
+      observedCapacity: null
+    });
+    expect((agenda.overdueTasks as Array<{ text: string }>).map((task) => task.text)).toEqual(["Old bug", "Pricing page"]);
+  });
+
+  it("prepares monthly and quarterly reviews with goals that lack an active project", async () => {
+    const { kernel } = await ritualFixture();
+    const monthly = await kernel.ritualAgenda("test", "monthly-review") as { goals: Array<{ title: string; activeProjects: number }>; weeklyReviews: Array<{ key: string }> };
+    expect(monthly.goals).toEqual([
+      expect.objectContaining({ title: "Get fit", horizon: "short", activeProjects: 1 }),
+      expect.objectContaining({ title: "Write a book", horizon: "long", activeProjects: 0 })
+    ]);
+    expect(monthly.weeklyReviews.map((review) => review.key)).toEqual(["2026-W40", "2026-W41", "2026-W42", "2026-W43", "2026-W44"]);
+    const quarterly = await kernel.ritualAgenda("test", "quarterly-review") as { period: { key: string }; monthlyReviews: Array<{ key: string }> };
+    expect(quarterly.period.key).toBe("2026-Q4");
+    expect(quarterly.monthlyReviews).toEqual([
+      { key: "2026-10", path: "reviews/2026-10.md", exists: false, status: null },
+      { key: "2026-11", path: "reviews/2026-11.md", exists: false, status: null },
+      { key: "2026-12", path: "reviews/2026-12.md", exists: false, status: null }
+    ]);
+    await expect(kernel.ritualAgenda("test", "evening" as never)).rejects.toThrow(/Unknown ritual/);
   });
 });

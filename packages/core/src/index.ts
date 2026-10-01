@@ -5,13 +5,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
+import { buildAgenda } from "./agenda.js";
+import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
 import { replaceSection } from "./sections.js";
 import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
+import { isoInZone } from "./time.js";
 
 export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
 export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
+export { RITUAL_FIELDS, RITUAL_IDS, type QuietHours, type RitualId, type RitualState, type RitualStatus } from "./rituals.js";
 
 /** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
 export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
@@ -40,6 +44,8 @@ const VaultSchema = z.object({
   mode: z.enum(["read-only", "read-write"]),
   routes: z.record(RouteSchema).default({}),
   bundle: z.array(z.string().min(1)).optional(),
+  /** The note whose frontmatter holds the planning method and ritual schedule (default `system/Method.md`). */
+  methodNote: z.string().min(1).optional(),
   /** Folders that search, listing, and task queries skip (default `_templates`). Validation still checks them. */
   ignore: z.array(z.string().min(1)).optional()
 });
@@ -156,6 +162,20 @@ export interface ContextBundle {
   notes: BundleNote[];
   skipped: Array<{ path: string; reason: "missing" | "excluded" | "restricted" | "budget" }>;
   totalChars: number;
+  /** Ritual state right now; present when the bundle is for today. */
+  rituals?: RitualReport;
+}
+
+export interface RitualReport {
+  vaultId: string;
+  /** The current time in the configured zone. */
+  now: string;
+  date: string;
+  timeZone: string;
+  quietHours: QuietHours | null;
+  rituals: RitualStatus[];
+  /** Set when the method note cannot be read, so no ritual is scheduled. */
+  error?: string;
 }
 
 export interface Backlink { path: string; line: number; excerpt: string; sha256: string }
@@ -247,6 +267,7 @@ function bumpUpdated(content: string, today: string): string {
   }
   return content;
 }
+
 
 export function resolveMarkdownPath(root: string, relativePath: string): string {
   if (isAbsolute(relativePath)) throw new Error("Absolute note paths are not allowed.");
@@ -401,6 +422,66 @@ export class LifeKernel {
     return this.periodNote(vaultId, { period: "day", ...(date ? { date } : {}), ...(routeName ? { route: routeName } : {}) });
   }
 
+  /**
+   * Where each ritual stands right now: not scheduled, upcoming, due, overdue, done, or skipped, with the
+   * streak and recently missed days. The schedule comes from the method note's frontmatter; completion
+   * comes from the daily note's `morning_plan` and `circle` fields and the review notes' `status`.
+   */
+  async ritualStatus(vaultId: string, options: { at?: Date } = {}): Promise<RitualReport> {
+    const vault = this.vault(vaultId);
+    const now = options.at ?? this.now();
+    const timeZone = this.config.timezone;
+    const today = localDate(timeZone, now);
+    const report: RitualReport = { vaultId: vault.id, now: isoInZone(now, timeZone), date: today, timeZone, quietHours: null, rituals: [] };
+    let method: Record<string, unknown>;
+    try {
+      method = readFrontmatter((await this.readNote(vault.id, vault.methodNote ?? "system/Method.md")).content) ?? {};
+    } catch (error: unknown) {
+      report.rituals = RITUAL_IDS.map((id) => ({ id, state: "not-scheduled" as const }));
+      report.error = `Method note unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      return report;
+    }
+    try { report.quietHours = parseQuietHours(method.quiet_hours); } catch (error: unknown) {
+      report.error = error instanceof Error ? error.message : String(error);
+    }
+
+    const outcome = (value: unknown): Outcome => value === "done" || value === "skipped" ? value : null;
+    const dailyCache = new Map<string, Record<string, unknown> | null>();
+    const dailyRoute = Object.values(vault.routes).find((route) => routePeriod(route) === "day");
+    let firstActiveDate: string | null = null;
+    if (dailyRoute) {
+      const names = await readdir(resolve(vault.path, dailyRoute.folder)).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return [] as string[]; throw error; });
+      firstActiveDate = names.filter((name) => /^\d{4}-\d{2}-\d{2}\.md$/.test(name)).map((name) => name.slice(0, 10)).sort()[0] ?? null;
+    }
+    report.rituals = await evaluateRituals(method, {
+      now, timeZone, today, firstActiveDate,
+      dailyOutcome: async (date, field) => {
+        if (!dailyCache.has(date)) {
+          // A note the agent may not read counts as not done; its fields are never exposed.
+          const found = await this.dailyNote(vault.id, date).catch(() => null);
+          dailyCache.set(date, found?.exists ? readFrontmatter(found.content) : null);
+        }
+        return outcome(dailyCache.get(date)?.[field]);
+      },
+      periodOutcome: async (period, date) => {
+        const found = await this.periodNote(vault.id, { period, date });
+        if (!found.exists) return null;
+        const status = readFrontmatter(found.content)?.status;
+        return status === "complete" ? "done" : status === "skipped" ? "skipped" : null;
+      }
+    });
+    return report;
+  }
+
+  /** What a ritual should cover on a date (default today), with sources. Reads only notes the agent may read. */
+  async ritualAgenda(vaultId: string, ritual: RitualId, options: { date?: string } = {}) {
+    const vault = this.vault(vaultId);
+    if (!(RITUAL_IDS as readonly string[]).includes(ritual)) throw new Error(`Unknown ritual: ${ritual}. Known: ${RITUAL_IDS.join(", ")}.`);
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    return buildAgenda(this, vault.id, ritual, date);
+  }
+
   /** List notes by frontmatter. Notes without the filtered value are left out. */
   async listNotes(vaultId: string, filter: { type?: string; status?: string; area?: string; folder?: string; updatedBefore?: string; updatedAfter?: string; includeRestricted?: boolean; limit?: number } = {}) {
     const vault = this.vault(vaultId);
@@ -507,7 +588,9 @@ export class LifeKernel {
         else throw error;
       }
     }
-    return { vaultId: vault.id, date, notes, skipped, totalChars };
+    const bundle: ContextBundle = { vaultId: vault.id, date, notes, skipped, totalChars };
+    if (date === this.today()) bundle.rituals = await this.ritualStatus(vault.id);
+    return bundle;
   }
 
   /** Find notes that link to a note with [[path]] or [[name]] wikilinks. Only AI-readable notes are searched. */
@@ -731,7 +814,7 @@ export class LifeKernel {
    * the changes. This is an owner action for the CLI, not an agent tool: it edits templates and the
    * vault marker, which no route covers.
    */
-  async migrate(vaultId: string, options: { apply?: boolean } = {}) {
+  async migrate(vaultId: string, options: { apply?: boolean; starterDir?: string } = {}) {
     const vault = this.vault(vaultId);
     if (options.apply && vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
     const plan = async () => {
@@ -743,13 +826,34 @@ export class LifeKernel {
       }
       const from = marker.layoutVersion ?? 1;
       const changes: Array<{ path: string; change: string; absolute: string; content: string }> = [];
+      const optional = (path: string) => readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+      /** Add blank frontmatter keys a note lacks, and apply an optional body change, as one planned change. */
+      const extend = async (path: string, keys: string[], body?: (content: string) => { content: string; change: string } | null) => {
+        const absolute = resolveMarkdownPath(vault.path, path);
+        const before = await optional(absolute);
+        const data = before === null ? null : readFrontmatter(before);
+        if (before === null || data === null) return;
+        const missing = keys.filter((key) => !(key in data));
+        let content = missing.length > 0 ? setFrontmatter(before, Object.fromEntries(missing.map((key) => [key, ""]))) : before;
+        const notes = missing.length > 0 ? [`add frontmatter fields ${missing.join(", ")}`] : [];
+        const edited = body?.(content);
+        if (edited) { content = edited.content; notes.push(edited.change); }
+        if (content !== before) changes.push({ path, change: notes.join("; "), absolute, content });
+      };
       if (from < 3) {
-        const template = join(vault.path, "_templates", "Daily.md");
-        const content = await readFile(template, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
-        const data = content === null ? null : readFrontmatter(content);
-        const missing = Object.fromEntries(Object.entries(DAILY_TEMPLATE_FIELDS).filter(([key]) => data && !(key in data)));
-        if (content !== null && Object.keys(missing).length > 0) {
-          changes.push({ path: "_templates/Daily.md", change: `add frontmatter fields ${Object.keys(missing).join(", ")}`, absolute: template, content: setFrontmatter(content, missing) });
+        await extend("_templates/Daily.md", Object.keys(DAILY_TEMPLATE_FIELDS), (content) => {
+          if (/^## Plan for today\s*$/m.test(content) || !/^## Day summary\s*$/m.test(content)) return null;
+          const eol = detectEol(content);
+          return { content: content.replace(/^## Day summary[ \t]*$/m, `## Plan for today${eol}${eol}## Day summary`), change: "add section Plan for today" };
+        });
+        await extend(vault.methodNote ?? "system/Method.md", RITUAL_FIELDS);
+        if (options.starterDir) {
+          const starterTemplates = join(options.starterDir, "_templates");
+          for (const name of (await readdir(starterTemplates)).filter((file) => file.endsWith(".md")).sort()) {
+            const absolute = join(vault.path, "_templates", name);
+            if (await optional(absolute) !== null) continue;
+            changes.push({ path: `_templates/${name}`, change: "add template", absolute, content: await readFile(join(starterTemplates, name), "utf8") });
+          }
         }
       }
       if (from < LAYOUT_VERSION) {
@@ -763,7 +867,10 @@ export class LifeKernel {
     if (!options.apply) { const { from, changes } = await plan(); return report(from, changes, false); }
     return this.withVaultLock(vault.id, async () => {
       const { from, changes } = await plan();
-      for (const change of changes) await replaceFile(change.absolute, change.content);
+      for (const change of changes) {
+        await mkdir(dirname(change.absolute), { recursive: true });
+        await replaceFile(change.absolute, change.content);
+      }
       if (changes.length > 0) {
         const event = { event: "vault_migrated", vaultId: vault.id, from, to: LAYOUT_VERSION, paths: changes.map((change) => change.path), at: this.now().toISOString() };
         await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
