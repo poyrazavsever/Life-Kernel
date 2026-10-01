@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased (toward 0.1.0)
+## Unreleased
+
+Planning data (roadmap phase 1).
+
+- `set_frontmatter` operation and `fields` on `create`, limited to each route's `fields` allowlist; protected keys can never be listed. Decisions can now be accepted, goals finished, and next actions set.
+- Frontmatter is read and written with a YAML parser that keeps comments and key order. `ai_access` accepts trailing comments, and an unrecognized value counts as `restricted`.
+- Periodic routes (`period: day | week | month | quarter`) keep one note per period, named `2026-10-01`, `2026-W40`, `2026-10`, or `2026-Q4`; new `period_get` tool and `POST /v1/period`.
+- `note_list` tool and `POST /v1/notes` list notes by type, status, area, folder, or updated date.
+- `tasks_open` tool and `POST /v1/tasks` collect open tasks in Obsidian Tasks format, sorted by due date and priority.
+- `vault_search` matches every term in any order, ignores case and accents (so "istanbul" finds "İstanbul"), and filters by `type` and `status`.
+- Search, listing, and tasks skip the vault's `ignore` folders (default `_templates`).
+- `vault_list` reports each route's period and writable fields.
+- Starter layout 3: daily template fields `energy`, `focus_hours`, `morning_plan`, `circle`, `circle_at`, and a tasks convention in the vault's `AGENTS.md`. `lifekernel migrate <vaultId> [--apply]` updates older vaults. New CLI commands `list` and `tasks`.
+- Skills use the new tools: the daily circle records energy and marks itself done, the weekly review reads the week's fields and overdue tasks, and decisions are accepted with `set_frontmatter`.
+
+## 0.1.0 (in progress)
 
 Remote mode for ChatGPT and Claude.ai.
 

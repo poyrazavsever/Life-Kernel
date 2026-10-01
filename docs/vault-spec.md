@@ -15,7 +15,7 @@ The server never returns `ai_access: none` notes. `restricted` notes require an 
 
 Tasks live in one canonical project or area note. Session notes contain evidence and link to that task. Decisions retain rationale and status. Unknown facts remain blank.
 
-## Starter layout (layout version 2)
+## Starter layout (layout version 3)
 
 The starter vault is an English, method-neutral scaffold. Folders exist for planning evidence, not for a prescribed method.
 
@@ -34,3 +34,10 @@ The starter vault is an English, method-neutral scaffold. Folders exist for plan
 
 Conventions: goals, decisions, and sessions are never deleted; their `status` changes. Tasks live in one project or area note. Unknown values stay blank. Agents follow `system/Method.md` rather than imposing a method, and converse in the user's language while keeping note headings in the template language.
 
+## Planning fields and tasks (layout version 3)
+
+Daily notes carry optional frontmatter that the daily circle fills only when the user states it: `energy` (1-5), `focus_hours`, `morning_plan` and `circle` (`done` or `skipped`), and `circle_at` (ISO 8601). Weekly reviews are named by ISO week (`reviews/2026-W40.md`).
+
+Tasks are checklist items in their project or area note, in Obsidian Tasks format: `- [ ] Draft pricing page 📅 2026-10-04 ⏫`. `- [x]` is done, `- [-]` cancelled, `- [/]` in progress.
+
+Agents change status, dates, and next actions with `set_frontmatter`, limited to the keys each route lists under `fields`. A vault made with an older layout is updated with `lifekernel migrate <vaultId>` (a report) and `lifekernel migrate <vaultId> --apply`.

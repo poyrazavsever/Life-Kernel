@@ -74,8 +74,9 @@ The HTTP server exposes `/mcp` and a small REST surface under `/v1`. Continue wi
 - search Markdown with file, line, and SHA-256 provenance;
 - read one safe relative Markdown path while enforcing `ai_access`;
 - fetch a bounded session context bundle and find backlinks;
-- look up the single daily note for a date;
-- preview a routed create, append, or section update;
+- look up the single daily, weekly, monthly, or quarterly note for a date;
+- list notes by type, status, or area, and collect open tasks by due date;
+- preview a routed create, append, section update, or frontmatter change;
 - apply the exact request idempotently;
 - validate required frontmatter and inspect recent audit events.
 

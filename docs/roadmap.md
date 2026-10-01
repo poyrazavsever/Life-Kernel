@@ -63,6 +63,8 @@ Phases 1 and 5 can run in parallel. Phase 3 depends on Phase 2, because a remind
 
 **Goal:** give the planning loop structured data while keeping Markdown readable in Obsidian.
 
+**Status:** done. No frontmatter cache was needed at current vault sizes. `lifekernel migrate` writes templates and the vault marker directly as an owner CLI action rather than through routes, since no route covers them.
+
 ### 1.1 Frontmatter writes
 
 Add a new operation, `set_frontmatter`. It updates named frontmatter keys on an existing note in the route folder. It needs `expectedSha256` and supports preview and audit like the other operations.
