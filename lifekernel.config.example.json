@@ -164,6 +164,17 @@
           "fields": [
             "status"
           ]
+        },
+        "outcome": {
+          "folder": "outcomes",
+          "type": "outcome",
+          "status": "active",
+          "area": "work",
+          "policy": "auto",
+          "rollup": true,
+          "fields": [
+            "status"
+          ]
         }
       }
     }

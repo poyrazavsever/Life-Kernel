@@ -10,7 +10,7 @@ Run only when the user starts it, typically after a daily circle on their chosen
 ## Gather
 
 1. `vault_list`, then `context_bundle` for the personal vault (raise `recentDaily` to 7).
-2. Call `ritual_agenda` with `ritual: "weekly-review"`. It returns the week's dates and key, whether this week's review note exists (update it instead of creating another), each day's `energy`, `focus_hours`, and `circle` with totals, tasks completed this week, tasks overdue by the week's end, active projects untouched all week, the week's decisions, last week's commitments, and stated and observed capacity, each with its source.
+2. Call `ritual_agenda` with `ritual: "weekly-review"`. It returns the week's dates and key, whether this week's review note exists (update it instead of creating another), each day's `energy`, `focus_hours`, and `circle` with totals, tasks completed this week, tasks overdue by the week's end, active projects untouched all week, the week's decisions, outcomes other vaults sent here (`outcomes`, each linking to its source), last week's commitments, and stated and observed capacity, each with its source.
 3. Read the daily, project, and session notes behind anything you want to discuss. Read only what you need.
 4. Read `system/Method.md` for the review rules.
 

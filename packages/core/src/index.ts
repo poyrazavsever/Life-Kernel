@@ -39,6 +39,11 @@ const RouteSchema = z.object({
   policy: z.enum(["auto", "review", "deny"]).default("review"),
   /** One note per period, named by its period key. Routes of type `daily` default to `day`. */
   period: z.enum(PERIODS).optional(),
+  /**
+   * A rollup route takes short, linked outcomes from other vaults: `create` and `set_frontmatter` only, a body
+   * of at most 600 characters, and a link to the detailed record (a wikilink, a URL, or `vault:path.md`).
+   */
+  rollup: z.boolean().optional(),
   /** Frontmatter keys that `create` and `set_frontmatter` may set on this route (default none). */
   fields: z.array(z.string().regex(FIELD_NAME).refine((key) => !(PROTECTED_FIELDS as readonly string[]).includes(key), (key) => ({ message: `${key} is a protected field and cannot be writable.` }))).optional()
 });
@@ -132,6 +137,9 @@ export interface KernelOptions {
 }
 
 interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: PreviewResult & { appliedAt?: string } }
+
+const ROLLUP_MAX_CHARS = 600;
+const ROLLUP_LINK = /\[\[[^\]]+\]\]|https?:\/\/\S+|\b[a-z0-9][a-z0-9-_]*:[^\s]+\.md\b/;
 
 /** Starter vault layout this release writes and migrates to. */
 export const LAYOUT_VERSION = 3;
@@ -357,7 +365,7 @@ export class LifeKernel {
   listVaults() {
     return this.config.vaults.map(({ id, kind, mode, routes }) => ({
       id, kind, mode,
-      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy, ...(routePeriod(route) ? { period: routePeriod(route) } : {}), fields: route.fields ?? [] }))
+      routes: Object.entries(routes).map(([name, route]) => ({ name, folder: route.folder, type: route.type, policy: route.policy, ...(routePeriod(route) ? { period: routePeriod(route) } : {}), ...(route.rollup ? { rollup: true } : {}), fields: route.fields ?? [] }))
     }));
   }
 
@@ -675,6 +683,11 @@ export class LifeKernel {
     if (operation !== "set_frontmatter" && request.body === undefined) throw new Error(`body is required for ${operation} operations.`);
     if (operation === "set_frontmatter" && Object.keys(request.fields ?? {}).length === 0) throw new Error("fields is required for set_frontmatter operations.");
     if (request.fields && operation !== "create" && operation !== "set_frontmatter") throw new Error("fields is only accepted for create and set_frontmatter operations.");
+    if (route.rollup) {
+      if (operation === "append" || operation === "update_section") throw new Error(`Route ${request.route} takes short outcomes only; create a new one instead of editing.`);
+      if (operation === "create" && (request.body!.trim().length > ROLLUP_MAX_CHARS)) throw new Error(`Route ${request.route} takes outcomes of at most ${ROLLUP_MAX_CHARS} characters; keep the detail in the source vault and link it.`);
+      if (operation === "create" && !ROLLUP_LINK.test(request.body!)) throw new Error(`Route ${request.route} needs a link to the detailed record: a [[wikilink]], a URL, or vault:path.md.`);
+    }
     const blocked = Object.keys(request.fields ?? {}).filter((key) => !(route.fields ?? []).includes(key));
     if (blocked.length > 0) throw new Error(`Route ${request.route} does not allow setting ${blocked.join(", ")}. Writable fields: ${(route.fields ?? []).join(", ") || "none"}.`);
 

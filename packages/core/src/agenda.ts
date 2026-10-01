@@ -193,6 +193,11 @@ export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: Ritua
       overdueTasks: await openTasks(end),
       stalledProjects: (await kernel.listNotes(vaultId, { type: "project", status: "active", updatedBefore: start, limit: 200 })).map((project) => ({ path: project.path, title: project.title, updated: label(project.frontmatter.updated) ?? null })),
       decisions,
+      // Short outcomes other vaults sent here this week, each linking to its detailed record.
+      outcomes: (await kernel.listNotes(vaultId, { type: "outcome", limit: 200 })).filter((outcome) => {
+        const created = label(outcome.frontmatter.created);
+        return created !== undefined && created >= start && created <= end;
+      }).map((outcome) => ({ path: outcome.path, title: outcome.title, source: label(outcome.frontmatter.source) ?? null })),
       previousCommitments: previousReview?.exists ? await section(kernel, vaultId, previousReview.path, "Next week's commitments") : null,
       statedCapacity: await section(kernel, vaultId, CAPACITY, "Stated capacity"),
       observedCapacity: await section(kernel, vaultId, CAPACITY, "Observed capacity")

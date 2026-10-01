@@ -722,3 +722,33 @@ describe("config files", () => {
     expect(await loadEnvBeside(join(root, "elsewhere", "c.json"), {})).toEqual([]);
   });
 });
+
+describe("rollup routes", () => {
+  async function rollupFixture() {
+    const f = await planningFixture();
+    f.config.vaults[0]!.routes.outcome = { folder: "outcomes", type: "outcome", status: "active", area: "work", policy: "auto", rollup: true, fields: ["status"] };
+    return f;
+  }
+  const outcome = (requestId: string, body: string) => write({ requestId, operation: "create", route: "outcome", title: "Shipped pricing", body, source: "startup project agent" });
+
+  it("accepts a short outcome that links to the detailed record, and shows it in the weekly review", async () => {
+    const { kernel } = await rollupFixture();
+    await kernel.applyWrite(outcome("outcome-0001", "Pricing page is live; details in startup:sessions/2026-09-30-pricing.md"));
+    expect(kernel.listVaults()[0]!.routes.find((route) => route.name === "outcome")).toMatchObject({ rollup: true });
+    const agenda = await kernel.ritualAgenda("test", "weekly-review", { date: "2026-09-30" }) as { outcomes: unknown[] };
+    expect(agenda.outcomes).toEqual([{ path: "outcomes/2026-09-30-shipped-pricing.md", title: "Shipped pricing", source: "startup project agent" }]);
+  });
+
+  it("refuses long or unlinked outcomes and edits to the body", async () => {
+    const { kernel } = await rollupFixture();
+    await expect(kernel.previewWrite(outcome("outcome-0002", "Done."))).rejects.toThrow(/needs a link/);
+    await expect(kernel.previewWrite(outcome("outcome-0003", `${"x".repeat(600)} [[Source]]`))).rejects.toThrow(/at most 600/);
+    for (const body of ["See [[sessions/pricing]]", "See https://example.com/pr/1", "See work:projects/launch.md"]) {
+      await expect(kernel.previewWrite(outcome(`outcome-${body.length}xx`, body))).resolves.toMatchObject({ operation: "create" });
+    }
+    await kernel.applyWrite(outcome("outcome-0004", "Linked [[Source]]"));
+    const note = await kernel.readNote("test", "outcomes/2026-09-30-shipped-pricing.md");
+    await expect(kernel.previewWrite(write({ requestId: "outcome-0005", operation: "append", route: "outcome", targetPath: note.path, expectedSha256: note.sha256, body: "More detail" }))).rejects.toThrow(/short outcomes only/);
+    await expect(kernel.previewWrite(write({ requestId: "outcome-0006", operation: "set_frontmatter", route: "outcome", targetPath: note.path, expectedSha256: note.sha256, fields: { status: "done" } }))).resolves.toMatchObject({ operation: "set_frontmatter" });
+  });
+});
