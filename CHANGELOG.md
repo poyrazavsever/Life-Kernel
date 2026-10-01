@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+Ritual reminders (roadmap phase 3).
+
+- `lifekernel tick` sends one reminder when a ritual is due and at most one follow-up, respecting quiet hours, snoozes, and pauses; it is safe to run every few minutes and remembers what it sent.
+- Channels: ntfy for phones, desktop notifications on Windows, macOS, and Linux, and HMAC-signed webhooks. Messages are minimal by default, in English or Turkish, with an optional link that opens your AI client on the ritual.
+- `lifekernel schedule install` registers the check with Task Scheduler, launchd, or a systemd user timer; `LIFEKERNEL_SCHEDULER=on` runs it inside the HTTP server for Docker and remote mode.
+- `snooze`, `skip` (recorded in the vault), `pause`, and `resume`; `notify test` checks a channel.
+- The rhythm as an iCalendar feed: `lifekernel ics`, or `/v1/rituals.ics` with its own `LIFEKERNEL_CALENDAR_TOKEN`.
+- Example configs include a disabled `notifications` section; see `docs/notifications.md`.
+
 Ritual engine (roadmap phase 2).
 
 - `ritual_status` tool and `POST /v1/rituals/status`: each ritual is not scheduled, upcoming, due, overdue, done, or skipped, with its due time, streak, last completion, and recently missed days. The schedule lives in the method note's frontmatter; days before the vault's first daily note are never counted as missed.

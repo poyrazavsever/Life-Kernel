@@ -208,6 +208,8 @@ Skills call `ritual_agenda` first instead of reading many notes, and the notific
 
 **Goal:** reminders reach the user where they are and open the ritual with one tap. This works in both local and remote mode, with no always-on laptop required.
 
+**Status:** done, with two changes. Telegram and email moved to Phase 4: Telegram belongs with two-way replies, and email needs an SMTP dependency that a weekly digest does not yet justify. Pauses are set with `lifekernel pause` rather than read from Availability, because free-text exceptions are too ambiguous to silence reminders safely. Live delivery has been tested against local servers and command construction, not yet on a real phone or desktop; `lifekernel notify test` is the first check.
+
 ### 3.1 How it runs
 
 ```mermaid
@@ -293,6 +295,7 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 - **Inbox triage:** `ritual_agenda` lists unprocessed inbox items. The daily circle offers to file each one into a project, area, or task, or to drop it.
 - **Action buttons:** Snooze 1h, Skip today, and Start. Buttons use short-lived, single-use signed URLs (`/v1/nudges/{id}/{action}?sig=`). Telegram uses inline buttons.
 - **CLI for humans:** `lifekernel today` prints the focus, due tasks, and ritual state. `lifekernel status` prints rituals and streaks.
+- **More channels (moved from Phase 3):** a Telegram bot channel, which also carries replies and buttons, and an email channel for weekly and monthly digests.
 
 ### Acceptance
 
