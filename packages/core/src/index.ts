@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
 import { buildAgenda } from "./agenda.js";
+import { replaceFile, withFileLock } from "./files.js";
 import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
 import { replaceSection } from "./sections.js";
 import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
@@ -126,8 +126,6 @@ interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: 
 export const LAYOUT_VERSION = 3;
 const DAILY_TEMPLATE_FIELDS: Record<string, FieldValue> = { energy: "", focus_hours: "", morning_plan: "", circle: "", circle_at: "" };
 
-const LOCK_TIMEOUT_MS = 10_000;
-const LOCK_STALE_MS = 30_000;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -244,17 +242,6 @@ async function readReceipt(path: string): Promise<Receipt | null> {
   }
 }
 
-/** Write through a temporary sibling and rename it, so a crash never leaves a half-written file. */
-async function replaceFile(path: string, content: string): Promise<void> {
-  const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
-  await writeFile(temporary, content, "utf8");
-  try { await rename(temporary, path); } catch (error: unknown) {
-    // Windows refuses to replace a file another program holds open; fall back to an in-place write.
-    if (!["EPERM", "EACCES", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-    await rm(temporary, { force: true });
-    await writeFile(path, content, "utf8");
-  }
-}
 
 function bumpUpdated(content: string, today: string): string {
   const lines = content.split(/\r?\n/);
@@ -768,27 +755,8 @@ export class LifeKernel {
     }
   }
 
-  private async withVaultLock<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
-    const lockDir = join(this.config.stateDir, "locks");
-    await mkdir(lockDir, { recursive: true });
-    const lockPath = join(lockDir, `${vaultId}.lock`);
-    const deadline = Date.now() + LOCK_TIMEOUT_MS;
-    for (;;) {
-      try {
-        const handle = await open(lockPath, "wx");
-        await handle.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-        await handle.close();
-        break;
-      } catch (error: unknown) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-      // A process that crashed while holding the lock leaves it behind; take it over once it is clearly stale.
-      const age = await stat(lockPath).then((info) => Date.now() - info.mtimeMs, () => 0);
-      if (age > LOCK_STALE_MS) { await rm(lockPath, { force: true }); continue; }
-      if (Date.now() > deadline) throw new Error(`Vault ${vaultId} is busy with another write; try again.`);
-      await delay(20 + Math.floor(Math.random() * 40));
-    }
-    try { return await work(); } finally { await rm(lockPath, { force: true }); }
+  private withVaultLock<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
+    return withFileLock(join(this.config.stateDir, "locks", `${vaultId}.lock`), `Vault ${vaultId} is busy with another write; try again.`, work);
   }
 
   async validate(vaultId?: string) {
