@@ -2,6 +2,8 @@ services:
   lifekernel:
     build: .
     restart: unless-stopped
+    # Run as the user that owns ./vaults so Obsidian on the host can still edit what the server writes.
+    user: "${LIFEKERNEL_UID:-1000}:${LIFEKERNEL_GID:-1000}"
     environment:
       LIFEKERNEL_CONFIG: /config/lifekernel.config.json
       LIFEKERNEL_API_TOKEN: ${LIFEKERNEL_API_TOKEN:-}

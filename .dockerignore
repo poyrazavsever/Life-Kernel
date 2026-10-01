@@ -9,3 +9,6 @@ private-docs
 lifekernel.config.json
 .lifekernel-data
 .tmp
+vaults
+.env.*
+skills-lock.json
