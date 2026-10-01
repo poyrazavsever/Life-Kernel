@@ -6,8 +6,7 @@ Life Kernel speaks MCP, so every client below talks to the same server and recei
 
 ```bash
 npm install && npm run build
-cp lifekernel.config.example.json lifekernel.config.json   # set the vault path and timezone
-npm run cli -- init ./vaults/personal
+npm run cli -- init ./vaults/personal   # also writes lifekernel.config.json if it is missing
 npm run cli -- doctor
 ```
 

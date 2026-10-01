@@ -48,10 +48,11 @@ git clone https://github.com/poyrazavsever/Life-Kernel.git
 cd Life-Kernel
 npm install
 npm run build
-cp lifekernel.config.example.json lifekernel.config.json
 npm run cli -- init ./vaults/personal
 npm run cli -- doctor
 ```
+
+`init` copies the starter vault and, when no `lifekernel.config.json` exists, writes one for it with your computer's time zone. Secrets such as tokens and the ntfy topic go in a `.env` file next to the config (see `.env.example`); every entry point reads it.
 
 Start a local MCP server:
 

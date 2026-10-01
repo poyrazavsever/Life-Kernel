@@ -2,7 +2,7 @@
 
 Life Kernel can remind you when a ritual is due: the morning plan, the daily circle, and the weekly, monthly, and quarterly reviews. A reminder is one short message with a link that opens your AI client with the ritual's starting phrase. Each occurrence gets one reminder and at most one gentle follow-up. Nothing is sent during quiet hours, while a ritual is snoozed, or while reminders are paused.
 
-Reminders need two things: the rhythm in your vault, and somewhere to deliver the message.
+Reminders need two things: the rhythm in your vault, and somewhere to deliver the message. If you have no `lifekernel.config.json` yet, run `npm run cli -- init ./vaults/personal` first; it creates the vault and the config.
 
 ## 1. Set the rhythm
 
@@ -48,14 +48,15 @@ Channels are listed under `notifications` in `lifekernel.config.json`. Secrets n
 1. Install ntfy on your phone (Android or iOS).
 2. Make up a long, unguessable topic name, for example by running `node -e "console.log('lk-' + crypto.randomUUID())"`. The topic works like a password: anyone who knows it can read and send messages on it.
 3. In the app, tap **+** and subscribe to that topic.
-4. Put the topic in the environment where Life Kernel runs:
+4. Create a file named `.env` next to `lifekernel.config.json` with the topic:
 
    ```bash
    LIFEKERNEL_NTFY_TOPIC=lk-your-random-topic
    ```
 
-   To use your own ntfy server, also set `LIFEKERNEL_NTFY_URL` (https), and `LIFEKERNEL_NTFY_TOKEN` if it requires an access token.
-5. Send a test:
+   Every Life Kernel command and server reads this file, including the scheduled check, which does not see variables set in your terminal. A variable already set in the environment wins over the file. To use your own ntfy server, also set `LIFEKERNEL_NTFY_URL` (https), and `LIFEKERNEL_NTFY_TOKEN` if it requires an access token.
+5. In `lifekernel.config.json`, set `"enabled": true` under `notifications`.
+6. Send a test:
 
    ```bash
    npm run cli -- notify test

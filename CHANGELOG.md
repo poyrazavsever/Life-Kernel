@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `lifekernel init` writes `lifekernel.config.json` for the new vault when none exists, with the computer's time zone. A missing config now produces instructions instead of a bare ENOENT.
+- The CLI, the stdio server, and the HTTP server read a `.env` file beside the config without overriding variables already set, so scheduled reminder checks see the ntfy topic and other secrets.
+- `vaults/` is ignored by Git, so a vault created inside the checkout is never committed.
+
 Ritual reminders (roadmap phase 3).
 
 - `lifekernel tick` sends one reminder when a ritual is due and at most one follow-up, respecting quiet hours, snoozes, and pauses; it is safe to run every few minutes and remembers what it sent.
