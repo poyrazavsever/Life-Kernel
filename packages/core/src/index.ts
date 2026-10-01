@@ -48,7 +48,7 @@ export type RouteConfig = z.infer<typeof RouteSchema>;
 
 const VaultSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-_]*$/),
-  kind: z.enum(["personal", "project", "research"]),
+  kind: z.enum(["personal", "project", "research", "startup", "work"]),
   path: z.string().min(1),
   mode: z.enum(["read-only", "read-write"]),
   routes: z.record(RouteSchema).default({}),
