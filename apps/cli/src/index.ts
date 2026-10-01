@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, tick, type RitualId } from "@lifekernel/core";
+import { capture, formatToday, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 
@@ -52,7 +52,24 @@ ${content}
     const starterDir = resolve(here, "../../../templates/starter-vault");
     return output(await kernel.migrate(args[0], { apply: args.includes("--apply"), starterDir }));
   }
-  if (command === "tick") return output(await tick(kernel, { dryRun: args.includes("--dry-run") }));
+  if (command === "tick") {
+    // Locally there is no long-running listener, so each check also reads Telegram replies.
+    const telegram = args.includes("--dry-run") ? null : await pollTelegram(kernel).catch((error: Error) => ({ error: error.message }));
+    return output({ ...await tick(kernel, { dryRun: args.includes("--dry-run") }), ...(telegram && !("enabled" in telegram && !telegram.enabled) ? { telegram } : {}) });
+  }
+  if (command === "capture") return output(await capture(kernel, notificationsVault(kernel), args.join(" "), { source: "cli", context: { client: { name: "lifekernel-cli" } } }));
+  if (command === "today") {
+    const vaultArg = args.find((arg) => !arg.startsWith("--"));
+    const summary = await todaySummary(kernel, vaultArg ?? notificationsVault(kernel));
+    if (args.includes("--json")) return output(summary);
+    process.stdout.write(`${formatToday(summary, kernel.config.notifications?.locale ?? "en")}\n`);
+    return;
+  }
+  if (command === "telegram") {
+    if (args[0] === "setup") return output({ chats: await telegramChats(kernel), next: "Put your chat's id in LIFEKERNEL_TELEGRAM_CHAT_ID in the .env beside the config." });
+    if (args[0] === "poll") return output(await pollTelegram(kernel));
+    throw new Error("Usage: lifekernel telegram <setup|poll>");
+  }
   if (command === "notify") {
     if (args[0] !== "test") throw new Error("Usage: lifekernel notify test [channel index]");
     return output(await sendTestNotification(kernel, args[1] === undefined ? {} : { index: Number(args[1]) }));
@@ -76,7 +93,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 

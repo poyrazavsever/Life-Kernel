@@ -59,6 +59,8 @@ try {
   if (!plan.dryRun || plan.files.length === 0 || !plan.files.every((file) => file.content.includes("tick"))) throw new Error(`schedule dry run looks wrong: ${JSON.stringify(plan)}`);
   const calendar = execFileSync(process.execPath, [cli, "ics", "personal"], { cwd: work, encoding: "utf8", env: { ...process.env, INIT_CWD: work, LIFEKERNEL_CONFIG: join(work, "lifekernel.config.json") } });
   if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
+  const today = run("today", "--json");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(today.date) || today.focus !== null) throw new Error(`today looks wrong for a fresh vault: ${JSON.stringify(today)}`);
   const broken = await brokenLinks(join(work, "vaults/personal"));
   if (broken.length) throw new Error(`broken wikilinks: ${broken.join("; ")}`);
   process.stdout.write(`fixture ok: ${validation.notes} notes validated\n`);
