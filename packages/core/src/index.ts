@@ -8,6 +8,7 @@ import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
 import { type VaultGrants } from "./access.js";
 import { buildAgenda } from "./agenda.js";
 import { replaceFile, withFileLock } from "./files.js";
+import { commitPaths, contentBefore, type HistoryResult } from "./history.js";
 import { ritualCalendar } from "./ics.js";
 import { NotificationsSchema } from "./nudges.js";
 import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
@@ -62,6 +63,8 @@ const VaultSchema = z.object({
   bundle: z.array(z.string().min(1)).optional(),
   /** The note whose frontmatter holds the planning method and ritual schedule (default `system/Method.md`). */
   methodNote: z.string().min(1).optional(),
+  /** `git`: commit every applied write in the vault's repository, which makes `undo` possible. */
+  history: z.enum(["git"]).optional(),
   /** Folders that search, listing, and task queries skip (default `_templates`). Validation still checks them. */
   ignore: z.array(z.string().min(1)).optional()
 });
@@ -128,7 +131,7 @@ export interface PreviewResult {
   changedBytes: number;
   preview: string;
 }
-export type ApplyResult = PreviewResult & { appliedAt: string; replayed: boolean };
+export type ApplyResult = PreviewResult & { appliedAt: string; replayed: boolean; history?: HistoryResult };
 
 /** Who asked for a write. `id` comes from authentication; `name` is what the client calls itself. */
 export interface WriteContext { client?: { id?: string; name?: string } }
@@ -818,7 +821,15 @@ export class LifeKernel {
       await mkdir(dirname(proposed.absolute), { recursive: true });
       if (request.operation === "create") await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" });
       else await replaceFile(proposed.absolute, proposed.after);
-      return this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
+      const applied = await this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
+      if (vault.history !== "git") return applied;
+      const history = await commitPaths(vault.path, [applied.path], `lifekernel: ${request.operation} ${applied.path}`, {
+        request: request.requestId, route: request.route, source: request.source,
+        ...(context.client?.id ? { client: context.client.id } : context.client?.name ? { client: context.client.name } : {})
+      });
+      // The note is already written; a failed commit is reported, never hidden, and does not undo the write.
+      if (!history.committed) await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "history_failed", vaultId: vault.id, path: applied.path, requestId: request.requestId, error: history.error })}\n`, "utf8");
+      return { ...applied, history };
     });
   }
 
@@ -840,6 +851,35 @@ export class LifeKernel {
 
   private withVaultLock<T>(vaultId: string, work: () => Promise<T>): Promise<T> {
     return withFileLock(join(this.config.stateDir, "locks", `${vaultId}.lock`), `Vault ${vaultId} is busy with another write; try again.`, work);
+  }
+
+  /**
+   * Restore a note to its content before one applied write, using the vault's git history. Without `apply` it
+   * only reports. It refuses when the note changed after that write (undo would discard later edits) and
+   * for creates (that would delete a note). An owner action for the CLI, audited and committed like a write.
+   */
+  async undo(requestId: string, options: { apply?: boolean } = {}) {
+    const receipt = await readReceipt(join(this.config.stateDir, "requests", `${WriteRequestSchema.shape.requestId.parse(requestId)}.json`));
+    if (!receipt || (receipt.state !== "applied" && receipt.state !== undefined)) throw new Error(`No applied write has requestId ${requestId}.`);
+    const { vaultId, path, operation, afterSha256, beforeSha256 } = receipt.result;
+    const vault = this.vault(vaultId);
+    if (vault.history !== "git") throw new Error(`Vault ${vault.id} does not keep history; set "history": "git" and keep the vault in a git repository.`);
+    if (operation === "create") throw new Error("Undoing a create would delete a note, which Life Kernel never does. Change its status instead.");
+    const absolute = resolveMarkdownPath(vault.path, path);
+    const current = sha256(await readFile(absolute, "utf8"));
+    if (current !== afterSha256) throw new Error(`${path} changed after ${requestId}; undoing it would discard those later edits.`);
+    const before = await contentBefore(vault.path, path, requestId);
+    if (sha256(before.content) !== beforeSha256) throw new Error(`The history of ${path} does not match the write being undone; nothing changed.`);
+    const report = { requestId, vaultId: vault.id, path, operation, commit: before.commit, restoresSha256: beforeSha256 };
+    if (!options.apply) return { ...report, applied: false };
+    if (vault.mode !== "read-write") throw new Error(`Vault ${vault.id} is read-only.`);
+    return this.withVaultLock(vault.id, async () => {
+      if (sha256(await readFile(absolute, "utf8")) !== afterSha256) throw new Error(`${path} changed while undoing; nothing changed.`);
+      await replaceFile(absolute, before.content);
+      const history = await commitPaths(vault.path, [path], `lifekernel: undo ${requestId} on ${path}`, { request: `undo-${requestId}`, undoes: requestId });
+      await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "write_undone", vaultId: vault.id, path, requestId, beforeSha256: afterSha256, afterSha256: beforeSha256, at: this.now().toISOString() })}\n`, "utf8");
+      return { ...report, applied: true, history };
+    });
   }
 
   async validate(vaultId?: string) {
