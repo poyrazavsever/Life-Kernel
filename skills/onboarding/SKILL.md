@@ -33,7 +33,18 @@ Do not impose one. Offer options with their trade-offs and let the user pick or 
 - **Daily top three + weekly outcomes**: light and outcome-focused; good for people who dislike schedules.
 - **Minimal**: only the daily circle and a weekly review; good for starting small.
 
-Also ask: usual circle time and length, which questions to always or never ask, weekly review day, what the agent may update without asking (default suggestion: the near-term plan and current state), what it must always confirm (default: profile, accepted decisions, goals), and the tone they want.
+Also ask: when (if at all) they want a morning plan, their usual circle time and length, which questions to always or never ask, their weekly review day and time, whether they want monthly and quarterly reviews, quiet hours when nothing should prompt them, what the agent may update without asking (default suggestion: the near-term plan and current state), what it must always confirm (default: profile, accepted decisions, goals), and the tone they want.
+
+Record the rhythm as `system/Method.md` frontmatter with `set_frontmatter` on route `method`, so `ritual_status` can tell when each ritual is due. Leave a key blank to turn that ritual off.
+
+| Key | Example | Meaning |
+| --- | --- | --- |
+| `morning_plan_time`, `morning_plan_days` | `"08:30"`, `"weekdays"` | Morning plan; days are `daily`, `weekdays`, `weekends`, `mon,wed`, or `mon-fri` |
+| `daily_circle_time`, `daily_circle_days` | `"21:30"`, `"daily"` | Evening circle |
+| `weekly_review_day`, `weekly_review_time` | `"sun"`, `"20:00"` | Weekly review |
+| `monthly_review_day`, `monthly_review_time` | `"last-sun"`, `"19:00"` | Monthly review; day is a number, `last`, `first-mon`, or `last-sun` |
+| `quarterly_review_day`, `quarterly_review_time` | `"last-sun"`, `"18:00"` | Quarterly review, in the quarter's last month |
+| `quiet_hours` | `"23:00-08:00"` | No prompts in this window |
 
 ## Propose, then write
 

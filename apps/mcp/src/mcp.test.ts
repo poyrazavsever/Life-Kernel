@@ -106,7 +106,7 @@ describe("skills over MCP", () => {
     expect(text).not.toMatch(/^---/);
 
     const prompts = (await client.listPrompts()).prompts.map((p) => p.name).sort();
-    expect(prompts).toEqual(["daily_circle", "onboarding", "project_memory", "second_brain", "weekly_review"]);
+    expect(prompts).toEqual(["daily_circle", "monthly_review", "morning_plan", "onboarding", "project_memory", "quarterly_review", "second_brain", "weekly_review"]);
     const prompt = await client.getPrompt({ name: "daily_circle", arguments: { vaultId: "test" } });
     const body = (prompt.messages[0]!.content as { text: string }).text;
     expect(body).toContain(text);
@@ -127,7 +127,7 @@ describe("skills over MCP", () => {
     const routes = new Set(Object.keys(config.vaults[0]!.routes));
     // Frontmatter keys such as daily_circle_time share a prefix with tools; they are checked against route fields instead.
     const fields = new Set(Object.values(config.vaults[0]!.routes).flatMap((route) => route.fields ?? []));
-    for (const name of ["onboarding", "daily-circle", "weekly-review", "second-brain", "project-memory"]) {
+    for (const name of ["onboarding", "morning-plan", "daily-circle", "weekly-review", "monthly-review", "quarterly-review", "second-brain", "project-memory"]) {
       const text = ((await client.callTool({ name: "skill_get", arguments: { name } })).content as Array<{ text: string }>)[0]!.text;
       for (const [, tool] of text.matchAll(/`((?:vault|note|write|daily|period|tasks|ritual|context|audit|skill)_[a-z_]+)`/g)) expect(tools.has(tool!) || fields.has(tool!), `${name} mentions unknown tool ${tool}`).toBe(true);
       for (const [, route] of text.matchAll(/routes? `([a-z]+)`/g)) expect(routes.has(route!), `${name} mentions unknown route ${route}`).toBe(true);

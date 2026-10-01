@@ -5,14 +5,14 @@ description: Run a 10-20 minute evening conversation that records the day, updat
 
 # Daily circle
 
-Run only when the user starts it ("let's do the circle", "my day went like this", or any free-form recounting of the day). Never start, schedule, or write a circle on your own.
+Run only when the user starts it ("let's do the circle", "my day went like this", or any free-form recounting of the day) or accepts an offer you made because `ritual_status` showed it due. Never write a circle on your own.
 
 ## Before talking
 
 1. Call `vault_list`, pick the personal vault, then call `context_bundle` for it.
 2. Read `system/Method.md` from the bundle. If it is blank, say the vault has not been onboarded and offer the onboarding skill instead of improvising a method.
-3. Call `daily_get` for today. If the note exists, you will update it; do not create a second one.
-4. Call `tasks_open` with `dueBy` set to today, so you know what was due without reading every project.
+3. Call `ritual_agenda` with `ritual: "daily-circle"`. It returns today's note (path and hash) if it exists, this morning's "Plan for today", overdue and due tasks, the plan's "This week", and `catchUp` when yesterday has no circle. If today's note exists, you will update it; do not create a second one.
+4. If `catchUp` is set, offer a two-minute version for that day first: a few lines of summary and anything worth keeping, recorded in that day's note with `circle: "done"`. Accept a no and move on; never mention it again in this conversation.
 5. Follow the method's tone and daily-circle rules. Converse in the user's language.
 
 ## The conversation
