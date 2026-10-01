@@ -79,6 +79,34 @@ describe("HTTP surface", () => {
     } finally { await close(); }
   });
 
+  it("lets the capture token add to the inbox and nothing else, and runs signed links once", async () => {
+    const kernel = await fixture();
+    kernel.config.vaults[0]!.routes.inbox = { folder: "inbox", type: "note", status: "inbox", area: "system", policy: "auto", period: "day", fields: ["status"] };
+    const captureToken = "capture-token-with-24-characters";
+    const app = createHttpApp(kernel, { token, captureToken });
+    const server = await new Promise<import("node:http").Server>((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const post = (path: string, body: unknown, bearer?: string) => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) }, body: JSON.stringify(body) });
+    try {
+      const captured = await post("/v1/capture", { text: "Buy stamps", source: "shortcut", requestId: "shortcut-0001" }, captureToken);
+      expect(captured.status).toBe(200);
+      expect(await captured.json()).toMatchObject({ path: expect.stringMatching(/^inbox\/\d{4}-\d{2}-\d{2}\.md$/), duplicate: false });
+      expect((await post("/v1/capture", { text: "Buy stamps", requestId: "shortcut-0001" }, captureToken)).status).toBe(200);
+      expect((await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${captureToken}` } })).status).toBe(403);
+      expect((await post("/v1/read", { vaultId: "test", path: "note.md" }, captureToken)).status).toBe(403);
+      expect((await post("/v1/capture", { text: "x" })).status).toBe(401);
+      expect((await post("/v1/capture", { nope: true }, token)).status).toBe(400);
+
+      const forged = await fetch(`${base}/v1/nudges/act?ritual=daily-circle&action=snooze&occurrence=x&expires=9999999999&nonce=n&sig=forged`, { method: "POST" });
+      expect(forged.status).toBe(403);
+      const { actionLink, actionSecret } = await import("@lifekernel/core");
+      const link = actionLink(base, await actionSecret(kernel), { ritual: "daily-circle", action: "snooze", occurrence: "daily-circle:2000-01-01", now: new Date() });
+      expect((await fetch(link, { method: "POST" })).status).toBe(409);
+      expect((await fetch(link, { method: "POST" })).status).toBe(403);
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+    expect(() => createHttpApp(kernel, { token, captureToken: token })).toThrow(/differ from the other tokens/);
+  });
+
   it("serves the ritual calendar only with its own token", async () => {
     const kernel = await fixture();
     const vault = kernel.config.vaults[0]!.path;

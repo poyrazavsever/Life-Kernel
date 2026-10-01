@@ -7,9 +7,9 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelconte
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { notificationsVault, type LifeKernel } from "@lifekernel/core";
+import { capture, notificationsVault, performLinkedAction, type LifeKernel } from "@lifekernel/core";
 import { LifeKernelOAuth, type OAuthOptions } from "./oauth.js";
-import { ALL_SCOPES, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
+import { ALL_SCOPES, SCOPE_CAPTURE, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
 import { createLifeKernelMcp } from "./server.js";
 import { VERSION } from "./version.js";
 
@@ -22,12 +22,15 @@ export interface HttpAppOptions {
   oauth?: OAuthOptions;
   /** Enables the read-only ritual calendar feed at /v1/rituals.ics?token=... */
   calendarToken?: string;
+  /** A token that can only add items to the inbox, for phone shortcuts and automations. */
+  captureToken?: string;
 }
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
-  const { token, origins = new Set<string>(), host = "127.0.0.1", oauth, calendarToken } = options;
+  const { token, origins = new Set<string>(), host = "127.0.0.1", oauth, calendarToken, captureToken } = options;
+  if (captureToken !== undefined && (captureToken.length < 24 || captureToken === token || captureToken === calendarToken)) throw new Error("LIFEKERNEL_CAPTURE_TOKEN must contain at least 24 characters and differ from the other tokens.");
   if (token !== undefined && token.length < 24) throw new Error("LIFEKERNEL_API_TOKEN must contain at least 24 characters.");
   if (calendarToken !== undefined && calendarToken.length < 24) throw new Error("LIFEKERNEL_CALENDAR_TOKEN must contain at least 24 characters.");
   if (calendarToken !== undefined && calendarToken === token) throw new Error("LIFEKERNEL_CALENDAR_TOKEN must differ from LIFEKERNEL_API_TOKEN.");
@@ -70,6 +73,9 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
       if (token !== undefined && safeEqual(candidate, token)) {
         return { token: candidate, clientId: "static-token", scopes: ALL_SCOPES, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
       }
+      if (captureToken !== undefined && safeEqual(candidate, captureToken)) {
+        return { token: candidate, clientId: "capture-token", scopes: [SCOPE_CAPTURE], expiresAt: Math.floor(Date.now() / 1000) + 3600 };
+      }
       if (provider) return provider.verifyAccessToken(candidate);
       throw new InvalidTokenError("Invalid token.");
     }
@@ -88,6 +94,29 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   };
   const read = [...protect, needs(SCOPE_READ)];
   const write = [...protect, needs(SCOPE_WRITE)];
+
+  // Capture needs the capture scope (the capture token) or full write access.
+  const captureAccess: RequestHandler = (req, res, next) => {
+    if (!req.auth?.scopes.some((scope) => scope === SCOPE_CAPTURE || scope === SCOPE_WRITE)) return void res.status(403).json({ error: "insufficient_scope", error_description: "This connection cannot add to the inbox." });
+    next();
+  };
+  app.post("/v1/capture", ...protect, captureAccess, async (req, res, next) => {
+    try {
+      if (typeof req.body?.text !== "string") return void res.status(400).json({ error: "Send JSON with a text field." });
+      const requestId = typeof req.body.requestId === "string" ? req.body.requestId : undefined;
+      res.json(await capture(kernel, typeof req.body.vaultId === "string" ? req.body.vaultId : notificationsVault(kernel), req.body.text, { source: typeof req.body.source === "string" ? req.body.source : "api", ...(requestId ? { requestId } : {}), context: { client: { id: req.auth!.clientId } } }));
+    } catch (e) { next(e); }
+  });
+
+  // Snooze and skip buttons in notifications. The signed, single-use link is the credential.
+  app.post("/v1/nudges/act", async (req, res) => {
+    try {
+      const result = await performLinkedAction(kernel, req.query as Record<string, unknown>);
+      res.status(result.ok ? 200 : 409).json(result);
+    } catch (error) {
+      res.status(403).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   app.get("/v1/vaults", ...read, (_req, res) => res.json(kernel.listVaults()));
   app.post("/v1/search", ...read, async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false, { type: req.body.type, status: req.body.status })); } catch (e) { next(e); } });
