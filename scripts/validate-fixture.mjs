@@ -38,7 +38,11 @@ async function brokenLinks(vault) {
 }
 
 try {
-  run("init", "vaults/personal");
+  const init = run("init", "vaults/personal");
+  if (!init.config.created) throw new Error(`init should create a config: ${JSON.stringify(init)}`);
+  const generated = run("doctor");
+  if (!generated.ok || !generated.checks[0].path.replaceAll("\\", "/").endsWith("vaults/personal")) throw new Error(`the generated config does not point at the vault: ${JSON.stringify(generated)}`);
+  if (run("init", "vaults/personal").config.created) throw new Error("init must not overwrite an existing config");
   await writeFile(join(work, "lifekernel.config.json"), JSON.stringify({
     version: 1, stateDir: "./state", timezone: "UTC",
     vaults: [{ id: "personal", kind: "personal", path: "./vaults/personal", mode: "read-write", routes: {} }]

@@ -1,11 +1,13 @@
-import { LifeKernel, loadConfig, tick } from "@lifekernel/core";
+import { LifeKernel, loadConfig, loadEnvBeside, tick } from "@lifekernel/core";
 import { createHttpApp } from "./app.js";
 import { validatePublicUrl } from "./oauth.js";
 
+const configPath = process.env.LIFEKERNEL_CONFIG ?? "./lifekernel.config.json";
+await loadEnvBeside(configPath);
 const host = process.env.LIFEKERNEL_HOST ?? "127.0.0.1";
 const port = Number(process.env.LIFEKERNEL_PORT ?? "8787");
 const origins = new Set((process.env.LIFEKERNEL_ALLOWED_ORIGINS ?? "").split(",").map((v) => v.trim()).filter(Boolean));
-const kernel = new LifeKernel(await loadConfig(process.env.LIFEKERNEL_CONFIG ?? "./lifekernel.config.json"));
+const kernel = new LifeKernel(await loadConfig(configPath));
 
 const publicUrl = process.env.LIFEKERNEL_PUBLIC_URL;
 const ownerSecret = process.env.LIFEKERNEL_OWNER_SECRET;

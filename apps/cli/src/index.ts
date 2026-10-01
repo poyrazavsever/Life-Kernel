@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { cp, mkdir, readFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LifeKernel, loadConfig, notificationsVault, pauseNudges, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, tick, type RitualId } from "@lifekernel/core";
+import { LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, tick, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 
@@ -24,7 +24,7 @@ async function main() {
     const template = resolve(here, "../../../templates/starter-vault");
     await mkdir(target, { recursive: true });
     await cp(template, target, { recursive: true, errorOnExist: false, force: false });
-    output({ ok: true, target });
+    output({ ok: true, target, config: await createConfig(target) });
     return;
   }
   if (command === "connect") {
@@ -36,6 +36,7 @@ ${content}
 `);
     return;
   }
+  await loadEnvBeside(configPath);
   const kernel = new LifeKernel(await loadConfig(configPath));
   if (command === "doctor") return output(await kernel.doctor());
   if (command === "validate") return output(await kernel.validate(args[0]));
@@ -77,6 +78,20 @@ ${content}
   }
   process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule> [...args] [--config path]\n");
   process.exitCode = 1;
+}
+
+/**
+ * Write a config for a new vault from the example, unless one exists: the vault path relative to the
+ * config, and this computer's time zone. Returns what happened, so `init` can say so.
+ */
+async function createConfig(vault: string) {
+  const path = resolve(configPath);
+  try { await readFile(path); return { path, created: false }; } catch { /* write a new one below */ }
+  const example = JSON.parse(await readFile(resolve(here, "../../../lifekernel.config.example.json"), "utf8")) as { timezone: string; vaults: Array<{ path: string }> };
+  example.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  example.vaults[0]!.path = `./${relative(dirname(path), vault).replaceAll("\\", "/")}`;
+  await writeFile(path, `${JSON.stringify(example, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  return { path, created: true };
 }
 
 function ritualArg(value: string | undefined): RitualId {
