@@ -18,6 +18,8 @@ Run only when the user starts it ("good morning", "let's plan the day") or accep
 
 Show a compact picture: the focus planned last night, what is due or overdue, and today's fixed commitments. Ask what the user wants to make true today. Help them choose one main focus and at most two supporting items that fit the time left around commitments and the buffer in `schedule/Capacity.md`.
 
+If `inbox.count` is above zero, mention the number and ask whether any captured item belongs in today's plan; full triage waits for the evening circle unless the user wants it now.
+
 Overdue tasks are choices, not debts. For the ones that matter, ask whether to do, reschedule, or drop them. Do not plan every hour unless the method uses time blocks. Do not add goals or outside commitments.
 
 ## Recording
