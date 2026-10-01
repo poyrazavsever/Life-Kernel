@@ -79,6 +79,28 @@ describe("HTTP surface", () => {
     } finally { await close(); }
   });
 
+  it("serves the ritual calendar only with its own token", async () => {
+    const kernel = await fixture();
+    const vault = kernel.config.vaults[0]!.path;
+    await mkdir(join(vault, "system"));
+    await writeFile(join(vault, "system/Method.md"), '---\nid: m\ntype: method\nstatus: active\narea: system\nprivacy: personal\nai_access: context\ndaily_circle_time: "21:30"\n---\n\n# Method\n', "utf8");
+    const calendarToken = "calendar-token-with-24-characters";
+    const app = createHttpApp(kernel, { token, calendarToken });
+    const server = await new Promise<import("node:http").Server>((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      expect((await fetch(`${base}/v1/rituals.ics`)).status).toBe(401);
+      expect((await fetch(`${base}/v1/rituals.ics?token=${token}`)).status).toBe(401);
+      const feed = await fetch(`${base}/v1/rituals.ics?token=${calendarToken}`);
+      expect(feed.status).toBe(200);
+      expect(feed.headers.get("content-type")).toMatch(/^text\/calendar/);
+      expect(await feed.text()).toContain("RRULE:FREQ=DAILY");
+      expect((await fetch(`${base}/v1/vaults?token=${calendarToken}`)).status).toBe(401);
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+    expect(() => createHttpApp(kernel, { token, calendarToken: "short" })).toThrow(/24 characters/);
+    expect(() => createHttpApp(kernel, { token, calendarToken: token })).toThrow(/must differ/);
+  });
+
   it("refuses short tokens", async () => {
     expect(() => createHttpApp(undefined as never, { token: "short" })).toThrow(/24 characters/);
   });

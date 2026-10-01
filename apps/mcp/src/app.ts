@@ -7,7 +7,7 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelconte
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { type LifeKernel } from "@lifekernel/core";
+import { notificationsVault, type LifeKernel } from "@lifekernel/core";
 import { LifeKernelOAuth, type OAuthOptions } from "./oauth.js";
 import { ALL_SCOPES, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
 import { createLifeKernelMcp } from "./server.js";
@@ -20,13 +20,17 @@ export interface HttpAppOptions {
   host?: string;
   /** Enables the OAuth 2.1 authorization server that ChatGPT and Claude.ai connectors need. */
   oauth?: OAuthOptions;
+  /** Enables the read-only ritual calendar feed at /v1/rituals.ics?token=... */
+  calendarToken?: string;
 }
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
-  const { token, origins = new Set<string>(), host = "127.0.0.1", oauth } = options;
+  const { token, origins = new Set<string>(), host = "127.0.0.1", oauth, calendarToken } = options;
   if (token !== undefined && token.length < 24) throw new Error("LIFEKERNEL_API_TOKEN must contain at least 24 characters.");
+  if (calendarToken !== undefined && calendarToken.length < 24) throw new Error("LIFEKERNEL_CALENDAR_TOKEN must contain at least 24 characters.");
+  if (calendarToken !== undefined && calendarToken === token) throw new Error("LIFEKERNEL_CALENDAR_TOKEN must differ from LIFEKERNEL_API_TOKEN.");
   if (token === undefined && !oauth) throw new Error("Set LIFEKERNEL_API_TOKEN or configure OAuth (LIFEKERNEL_PUBLIC_URL and LIFEKERNEL_OWNER_SECRET).");
 
   const provider = oauth ? new LifeKernelOAuth(oauth) : undefined;
@@ -36,6 +40,18 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: VERSION }));
+
+  // Calendar apps cannot send headers, so the feed takes its own token in the URL. It grants nothing
+  // but ritual names and times, and it is separate from every token that can read or write notes.
+  if (calendarToken !== undefined) {
+    app.get("/v1/rituals.ics", async (req, res, next) => {
+      const given = typeof req.query.token === "string" ? req.query.token : "";
+      if (!safeEqual(given, calendarToken)) return void res.status(401).json({ error: "Invalid calendar token." });
+      try {
+        res.type("text/calendar; charset=utf-8").set("cache-control", "private, max-age=300").send(await kernel.ritualCalendar(notificationsVault(kernel)));
+      } catch (e) { next(e); }
+    });
+  }
 
   const resourceMetadataUrl = provider ? getOAuthProtectedResourceMetadataUrl(provider.resourceUrl) : undefined;
   if (provider && oauth) {
