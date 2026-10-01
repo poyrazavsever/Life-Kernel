@@ -76,6 +76,13 @@ try {
   } catch (error) {
     if (!String(error.stderr ?? error.message).includes("Briefs are off")) throw error;
   }
+  // The vault ID is optional on a one-vault setup and still accepted when given.
+  for (const withVault of [[], ["personal"]]) {
+    const status = run("rituals", ...withVault);
+    if (!Array.isArray(status.rituals)) throw new Error(`rituals without a vault ID looks wrong: ${JSON.stringify(status)}`);
+    const agenda = run("agenda", ...withVault, "daily-circle");
+    if (agenda.ritual !== "daily-circle") throw new Error(`agenda without a vault ID looks wrong: ${JSON.stringify(agenda)}`);
+  }
   const insights = run("insights", "week", "--json");
   if (insights.period.kind !== "week" || insights.days.recorded !== 0 || insights.observations.length !== 0) throw new Error(`a fresh vault should have empty insights: ${JSON.stringify(insights)}`);
   const broken = await brokenLinks(join(work, "vaults/personal"));
