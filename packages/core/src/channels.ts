@@ -105,7 +105,8 @@ export function desktopCommand(platform: NodeJS.Platform, message: NudgeMessage,
   const textEnv = { ...env, LK_TITLE: message.title, LK_BODY: message.body, LK_URL: url ?? "" };
   if (platform === "win32") return { command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_TOAST], env: textEnv };
   if (platform === "darwin") return { command: "osascript", args: ["-e", 'display notification (system attribute "LK_BODY") with title (system attribute "LK_TITLE")'], env: textEnv };
-  return { command: "notify-send", args: ["--app-name=Life Kernel", message.title, message.body], env: textEnv };
+  // "--" ends option parsing, so a title or body that starts with "-" (agenda lines come from notes) is text.
+  return { command: "notify-send", args: ["--app-name=Life Kernel", "--", message.title, message.body], env: textEnv };
 }
 
 export function createChannel(config: ChannelConfig, deps: ChannelDeps = defaultDeps()): Channel {
