@@ -20,8 +20,16 @@ describe("connect snippets", () => {
     expect(toml).toContain(`LIFEKERNEL_CONFIG = '${config}'`);
   });
 
+  it("nests the server under each editor's own key", () => {
+    for (const client of ["cursor", "windsurf", "gemini-cli"] as const) {
+      expect(JSON.parse(connectSnippet(client, stdio, config).content).mcpServers.lifekernel).toEqual({ command: "node", args: [stdio], env: { LIFEKERNEL_CONFIG: config } });
+    }
+    expect(JSON.parse(connectSnippet("vscode", stdio, config).content).servers.lifekernel).toEqual({ type: "stdio", command: "node", args: [stdio], env: { LIFEKERNEL_CONFIG: config } });
+  });
+
   it("recognizes only supported clients", () => {
     expect(isClient("codex")).toBe(true);
-    expect(isClient("cursor")).toBe(false);
+    expect(isClient("cursor")).toBe(true);
+    expect(isClient("notepad")).toBe(false);
   });
 });

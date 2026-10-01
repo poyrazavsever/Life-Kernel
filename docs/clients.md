@@ -16,6 +16,7 @@ npm run cli -- doctor
 npm run cli -- connect claude-desktop
 npm run cli -- connect claude-code
 npm run cli -- connect codex
+npm run cli -- connect cursor   # also vscode, windsurf, gemini-cli
 ```
 
 ## Claude Desktop
@@ -29,6 +30,10 @@ Run the printed `claude mcp add ...` command once. Check it with `claude mcp lis
 ## Codex
 
 Append the printed block to `~/.codex/config.toml` and restart Codex.
+
+## Cursor, VS Code, Windsurf, and Gemini CLI
+
+`lifekernel connect cursor`, `vscode`, `windsurf`, or `gemini-cli` prints a JSON block and the file it belongs in. Merge it into that file's existing servers object and restart the editor or CLI. VS Code reads `servers` with `"type": "stdio"`; the others read `mcpServers`.
 
 ## First conversation
 
