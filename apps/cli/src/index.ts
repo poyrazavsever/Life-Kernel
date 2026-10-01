@@ -39,7 +39,7 @@ ${content}
   if (command === "read") return output(await kernel.readNote(args[0] ?? "", args[1] ?? ""));
   if (command === "preview" || command === "apply") {
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
-    return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request));
+    return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
   process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|preview|apply> [...args]\n");
   process.exitCode = 1;

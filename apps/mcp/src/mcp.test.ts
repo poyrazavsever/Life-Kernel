@@ -42,6 +42,20 @@ describe("MCP tools", () => {
     expect(text).toContain("note.md");
     expect(text).not.toContain("hidden.md");
   });
+
+  it("names the writing client in the audit log", async () => {
+    const kernel = await fixture();
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createLifeKernelMcp(kernel).connect(serverSide);
+    const client = new Client({ name: "audit-client", version: "0.0.0" });
+    await client.connect(clientSide);
+
+    const request = { requestId: "audit-0001", vaultId: "test", operation: "create", route: "daily", title: "Day", body: "Done.", source: "test", sourceDate: "2026-09-30" };
+    await client.callTool({ name: "write_apply", arguments: { request } });
+    const [event] = await kernel.recentAudit(1);
+    expect(event).toMatchObject({ event: "write_applied", client: { name: "audit-client" } });
+    expect(event.client).not.toHaveProperty("id");
+  });
 });
 
 describe("HTTP surface", () => {

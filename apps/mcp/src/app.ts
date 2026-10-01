@@ -11,6 +11,7 @@ import { type LifeKernel } from "@lifekernel/core";
 import { LifeKernelOAuth, type OAuthOptions } from "./oauth.js";
 import { ALL_SCOPES, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
 import { createLifeKernelMcp } from "./server.js";
+import { VERSION } from "./version.js";
 
 export interface HttpAppOptions {
   /** Static bearer token for trusted clients such as Claude Code. Optional when OAuth is enabled. */
@@ -34,7 +35,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   if (oauth) app.set("trust proxy", 1);
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: "0.1.0-alpha.0" }));
+  app.get("/health", (_req, res) => res.json({ ok: true, service: "lifekernel", version: VERSION }));
 
   const resourceMetadataUrl = provider ? getOAuthProtectedResourceMetadataUrl(provider.resourceUrl) : undefined;
   if (provider && oauth) {
@@ -80,7 +81,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   app.post("/v1/backlinks", ...read, async (req, res, next) => { try { res.json(await kernel.backlinks(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false, req.body.limit)); } catch (e) { next(e); } });
   app.post("/v1/validate", ...read, async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });
   app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });
-  app.post("/v1/writes/apply", ...write, async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body)); } catch (e) { next(e); } });
+  app.post("/v1/writes/apply", ...write, async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body, { client: { id: req.auth!.clientId } })); } catch (e) { next(e); } });
 
   // A session belongs to the client that initialized it.
   const sessions = new Map<string, { transport: StreamableHTTPServerTransport; clientId: string }>();

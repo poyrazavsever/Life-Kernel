@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { LifeKernel, WriteRequestSchema } from "@lifekernel/core";
+import { LifeKernel, WriteRequestSchema, type WriteContext } from "@lifekernel/core";
 import { SCOPE_WRITE } from "./scopes.js";
 import { loadSkills, type Skill } from "./skills.js";
+import { VERSION } from "./version.js";
 
 // Local stdio has no auth info and is fully trusted; remote connections must carry the write scope.
 function assertWritable(extra: { authInfo?: { scopes: string[] } }): void {
@@ -20,7 +21,12 @@ export const INSTRUCTIONS = [
 ].join("\n");
 
 export function createLifeKernelMcp(kernel: LifeKernel, skills: Skill[] = loadSkills()) {
-  const server = new McpServer({ name: "lifekernel", version: "0.1.0-alpha.0" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "lifekernel", version: VERSION }, { instructions: INSTRUCTIONS });
+  // The audit log names the writer: the authenticated client ID, and the name the client reported at initialize.
+  const caller = (extra: { authInfo?: { clientId: string } }): WriteContext => {
+    const name = server.server.getClientVersion()?.name;
+    return { client: { ...(extra.authInfo ? { id: extra.authInfo.clientId } : {}), ...(name ? { name } : {}) } };
+  };
 
   const skillNames = skills.map((skill) => skill.name);
   server.tool(
@@ -46,7 +52,7 @@ export function createLifeKernelMcp(kernel: LifeKernel, skills: Skill[] = loadSk
   server.tool("context_bundle", "Return the minimum session context: the vault's bundle notes, today's daily note, and recent daily notes, within a character budget. Each note includes the hash of the full note.", { vaultId: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), maxChars: z.number().int().min(1000).max(200000).default(24000), recentDaily: z.number().int().min(0).max(14).default(3), includeRestricted: z.boolean().default(false) }, async (input) => json(await kernel.contextBundle(input.vaultId, input)));
   server.tool("note_backlinks", "List notes that link to a given note, with line excerpts.", { vaultId: z.string(), path: z.string(), limit: z.number().int().min(1).max(100).default(50), includeRestricted: z.boolean().default(false) }, async (input) => json(await kernel.backlinks(input.vaultId, input.path, input.includeRestricted, input.limit)));
   server.tool("write_preview", "Preview a routed create or append without changing the vault.", { request: WriteRequestSchema }, async (input, extra) => { assertWritable(extra); return json(await kernel.previewWrite(input.request)); });
-  server.tool("write_apply", "Apply a previously reviewed write request idempotently and record an audit event.", { request: WriteRequestSchema }, async (input, extra) => { assertWritable(extra); return json(await kernel.applyWrite(input.request)); });
+  server.tool("write_apply", "Apply a previously reviewed write request idempotently and record an audit event.", { request: WriteRequestSchema }, async (input, extra) => { assertWritable(extra); return json(await kernel.applyWrite(input.request, caller(extra))); });
   server.tool("vault_validate", "Validate required frontmatter in one vault or all vaults.", { vaultId: z.string().optional() }, async (input) => json(await kernel.validate(input.vaultId)));
   server.tool("audit_recent", "Read recent local mutation audit events.", { limit: z.number().int().min(1).max(100).default(20) }, async (input) => json(await kernel.recentAudit(input.limit)));
   return server;

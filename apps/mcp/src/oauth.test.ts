@@ -20,7 +20,8 @@ async function start() {
   await mkdir(vault);
   await writeFile(join(vault, "note.md"), "---\nid: n\ntype: note\nstatus: active\narea: a\nprivacy: personal\nai_access: context\n---\n\n# Note\n", "utf8");
   const config: LifeKernelConfig = { version: 1, stateDir: join(root, "state"), timezone: "UTC", vaults: [{ id: "test", kind: "personal", path: vault, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "x", policy: "auto" } } }] };
-  const app = createHttpApp(new LifeKernel(config), { token: staticToken, oauth: { publicUrl: new URL("http://localhost"), ownerSecret, stateDir: config.stateDir } });
+  const kernel = new LifeKernel(config);
+  const app = createHttpApp(kernel, { token: staticToken, oauth: { publicUrl: new URL("http://localhost"), ownerSecret, stateDir: config.stateDir } });
   const server = await new Promise<import("node:http").Server>((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const form = (body: Record<string, string>) => ({ method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body).toString(), redirect: "manual" as const });
@@ -46,7 +47,7 @@ async function start() {
     return { code, response, body: await response.json() as Record<string, string> };
   }
 
-  return { base, root, form, register, connect, tokens, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+  return { base, root, kernel, form, register, connect, tokens, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
 const bearer = (value: string) => ({ authorization: `Bearer ${value}` });
@@ -196,11 +197,14 @@ describe("real MCP client over HTTP with an OAuth token", () => {
   it("lets a write-scoped token read, preview, and apply", async () => {
     const s = await start();
     try {
-      const c = await client(s.base, (await s.tokens(await s.connect({ write: true }))).body.access_token!);
+      const flow = await s.connect({ write: true });
+      const c = await client(s.base, (await s.tokens(flow)).body.access_token!);
       expect(c.getInstructions()).toMatch(/skill_get/);
       await c.callTool({ name: "write_preview", arguments: { request } });
       const applied = await c.callTool({ name: "write_apply", arguments: { request } });
       expect(applied.isError).toBeFalsy();
+      const [event] = await s.kernel.recentAudit(1);
+      expect(event).toMatchObject({ event: "write_applied", client: { id: flow.client.client_id, name: "t" } });
       await c.close();
     } finally { await s.close(); }
   });
