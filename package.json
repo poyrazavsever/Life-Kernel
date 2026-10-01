@@ -13,7 +13,8 @@
   "scripts": {
     "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build",
     "lint": "eslint .",
-    "typecheck":"npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck",
+    "coverage": "npm run test --workspaces --if-present -- --coverage --coverage.reporter=text-summary",
+    "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck",
     "test": "npm run test --workspaces --if-present",
     "dev:stdio": "npm --workspace @lifekernel/mcp run dev:stdio",
     "dev:http": "npm --workspace @lifekernel/mcp run dev:http",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^5.0.2",
     "eslint": "^10.11.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.3",
