@@ -42,6 +42,27 @@ describe("withFileLock", () => {
     expect(overlapped).toBe(false);
   });
 
+  it("never lets two holders overlap across repeated takeovers of stale locks", async () => {
+    // Each round leaves a dead process's lock behind and starts a crowd of contenders at once. The old
+    // check-then-delete takeover let a late contender delete the lock its winner had just created.
+    const lock = await lockIn();
+    await withFileLock(lock, "busy", async () => undefined);
+    let inside = 0;
+    let overlaps = 0;
+    for (let round = 0; round < 12; round += 1) {
+      await writeFile(lock, JSON.stringify({ token: `dead-${round}`, pid: 1 }));
+      const old = new Date(Date.now() - 60_000);
+      await utimes(lock, old, old);
+      await Promise.all(Array.from({ length: 10 }, () => withFileLock(lock, "busy", async () => {
+        inside += 1;
+        if (inside > 1) overlaps += 1;
+        await delay(3);
+        inside -= 1;
+      }, { staleMs: 1_000, timeoutMs: 20_000 })));
+    }
+    expect(overlaps).toBe(0);
+  });
+
   it("keeps a slow holder's lock from looking stale", async () => {
     const lock = await lockIn();
     let intruded = false;
