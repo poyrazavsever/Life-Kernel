@@ -391,8 +391,7 @@ export class LifeKernel {
   async doctor() {
     const checks = [];
     for (const vault of this.config.vaults) {
-      let ok = false;
-      try { ok = (await stat(vault.path)).isDirectory(); } catch { ok = false; }
+      const ok = await stat(vault.path).then((info) => info.isDirectory(), () => false);
       checks.push({ vaultId: vault.id, path: vault.path, mode: vault.mode, ok });
     }
     return { ok: checks.every((item) => item.ok), checks, stateDir: this.config.stateDir };
@@ -927,7 +926,7 @@ export class LifeKernel {
       let marker: { layoutVersion?: number };
       try { marker = JSON.parse(await readFile(markerPath, "utf8")) as { layoutVersion?: number }; } catch (error: unknown) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        throw new Error(`Vault ${vault.id} has no .lifekernel/vault.json, so it was not created by lifekernel init.`);
+        throw new Error(`Vault ${vault.id} has no .lifekernel/vault.json, so it was not created by lifekernel init.`, { cause: error });
       }
       const from = marker.layoutVersion ?? 1;
       const changes: Array<{ path: string; change: string; absolute: string; content: string }> = [];

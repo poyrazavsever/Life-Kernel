@@ -25,7 +25,7 @@ export interface OAuthOptions {
 }
 
 interface RefreshRecord { clientId: string; scopes: string[]; resource: string; expiresAt: number }
-interface AccessRecord extends RefreshRecord {}
+type AccessRecord = RefreshRecord;
 interface CodeRecord { clientId: string; challenge: string; redirectUri: string; scopes: string[]; resource: string; expiresAt: number }
 interface PendingRecord { clientId: string; params: AuthorizationParams; expiresAt: number }
 interface Persisted { clients: Record<string, OAuthClientInformationFull>; refresh: Record<string, RefreshRecord> }

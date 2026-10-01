@@ -287,7 +287,7 @@ describe("line endings", () => {
   it("validates and enforces AI access on CRLF notes and notes with a BOM", async () => {
     const { kernel, vault } = await fixture();
     await writeFile(join(vault, "windows.md"), crlf(`${frontmatter()}\n# Windows\n`), "utf8");
-    await writeFile(join(vault, "bom.md"), `﻿${frontmatter()}\n# Bom\n`, "utf8");
+    await writeFile(join(vault, "bom.md"), `\uFEFF${frontmatter()}\n# Bom\n`, "utf8");
     await writeFile(join(vault, "hidden.md"), crlf(`${frontmatter("none")}\n# Hidden needle\n`), "utf8");
     expect(await kernel.validate("test")).toEqual({ ok: true, notes: 3, issues: [] });
     await expect(kernel.readNote("test", "hidden.md", true)).rejects.toThrow(/excluded/);

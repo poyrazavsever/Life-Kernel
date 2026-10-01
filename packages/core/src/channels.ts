@@ -178,6 +178,8 @@ export function createChannel(config: ChannelConfig, deps: ChannelDeps = default
         } catch (error: unknown) {
           // SMTP errors can echo the server URL, which holds the password; report the code only.
           const code = (error as { code?: string; responseCode?: number }).responseCode ?? (error as { code?: string }).code ?? "unknown";
+          // The cause is dropped on purpose: it can carry the SMTP URL and its password.
+          // eslint-disable-next-line preserve-caught-error
           throw new Error(`Email delivery failed (${code}).`);
         }
       }
