@@ -5,11 +5,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
+import { replaceSection } from "./sections.js";
 import { parseTasks, PRIORITY_RANK, type Task } from "./tasks.js";
 
 export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
 export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
+export { readSection, replaceSection } from "./sections.js";
 
 /** Keys no route may change: identity, provenance, and access. Lowering ai_access stays a human action. */
 export const PROTECTED_FIELDS = ["id", "type", "created", "updated", "source", "source_date", "privacy", "ai_access"] as const;
@@ -244,36 +246,6 @@ function bumpUpdated(content: string, today: string): string {
     }
   }
   return content;
-}
-
-/** Replace the body under one heading, up to the next heading of the same or higher level. */
-export function replaceSection(content: string, heading: string, body: string): { content: string; section: string } {
-  const eol = detectEol(content);
-  const lines = content.split(/\r?\n/);
-  const wanted = heading.replace(/^#+\s*/, "").trim();
-  const headings: Array<{ index: number; level: number; text: string }> = [];
-  let fence: string | null = null;
-  for (let index = frontmatterEnd(lines); index < lines.length; index += 1) {
-    const line = lines[index]!;
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1]![0]!;
-      if (!fence) fence = marker;
-      else if (marker === fence) fence = null;
-      continue;
-    }
-    if (fence) continue;
-    const match = line.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
-    if (match) headings.push({ index, level: match[1]!.length, text: match[2]!.trim() });
-  }
-  const matches = headings.filter((candidate) => candidate.text === wanted);
-  if (matches.length === 0) throw new Error(`Section not found: ${wanted}`);
-  if (matches.length > 1) throw new Error(`Section heading is ambiguous: ${wanted}`);
-  const target = matches[0]!;
-  const next = headings.find((candidate) => candidate.index > target.index && candidate.level <= target.level);
-  const replacement = [lines[target.index]!, "", ...body.trim().split(/\r?\n/), ""];
-  const rebuilt = [...lines.slice(0, target.index), ...replacement, ...(next ? lines.slice(next.index) : [])];
-  return { content: rebuilt.join(eol).replace(/(\r?\n)*$/, eol), section: replacement.join(eol).trim() };
 }
 
 export function resolveMarkdownPath(root: string, relativePath: string): string {
