@@ -49,6 +49,12 @@ try {
   if (!validation.ok || validation.notes === 0) throw new Error(`validate failed: ${JSON.stringify(validation)}`);
   const migration = run("migrate", "personal");
   if (migration.from !== migration.to || migration.changes.length) throw new Error(`a fresh vault should need no migration: ${JSON.stringify(migration)}`);
+  const quiet = run("tick", "--dry-run");
+  if (quiet.enabled !== false) throw new Error(`tick should be off without a notifications section: ${JSON.stringify(quiet)}`);
+  const plan = run("schedule", "install", "--dry-run", "--config", join(work, "lifekernel.config.json"));
+  if (!plan.dryRun || plan.files.length === 0 || !plan.files.every((file) => file.content.includes("tick"))) throw new Error(`schedule dry run looks wrong: ${JSON.stringify(plan)}`);
+  const calendar = execFileSync(process.execPath, [cli, "ics", "personal"], { cwd: work, encoding: "utf8", env: { ...process.env, INIT_CWD: work, LIFEKERNEL_CONFIG: join(work, "lifekernel.config.json") } });
+  if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
   const broken = await brokenLinks(join(work, "vaults/personal"));
   if (broken.length) throw new Error(`broken wikilinks: ${broken.join("; ")}`);
   process.stdout.write(`fixture ok: ${validation.notes} notes validated\n`);
