@@ -5,16 +5,17 @@
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "evals"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build",
+    "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build && npm --workspace @lifekernel/evals run build",
     "lint": "eslint .",
     "coverage": "npm run test --workspaces --if-present -- --coverage --coverage.reporter=text-summary",
-    "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck",
+    "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck && npm --workspace @lifekernel/evals run typecheck",
     "test": "npm run test --workspaces --if-present",
     "dev:stdio": "npm --workspace @lifekernel/mcp run dev:stdio",
     "dev:http": "npm --workspace @lifekernel/mcp run dev:http",
