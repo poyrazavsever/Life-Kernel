@@ -45,6 +45,28 @@
             "status"
           ]
         },
+        "monthly": {
+          "folder": "reviews",
+          "type": "monthly-review",
+          "status": "active",
+          "area": "life",
+          "policy": "auto",
+          "period": "month",
+          "fields": [
+            "status"
+          ]
+        },
+        "quarterly": {
+          "folder": "reviews",
+          "type": "quarterly-review",
+          "status": "active",
+          "area": "life",
+          "policy": "auto",
+          "period": "quarter",
+          "fields": [
+            "status"
+          ]
+        },
         "decision": {
           "folder": "decisions",
           "type": "decision",
@@ -117,7 +139,20 @@
           "type": "method",
           "status": "active",
           "area": "system",
-          "policy": "review"
+          "policy": "review",
+          "fields": [
+            "morning_plan_time",
+            "morning_plan_days",
+            "daily_circle_time",
+            "daily_circle_days",
+            "weekly_review_day",
+            "weekly_review_time",
+            "monthly_review_day",
+            "monthly_review_time",
+            "quarterly_review_day",
+            "quarterly_review_time",
+            "quiet_hours"
+          ]
         },
         "area": {
           "folder": "areas",

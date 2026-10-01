@@ -18,6 +18,8 @@ source_date: "{{date}}"
 
 # {{date}} — Daily Circle
 
+## Plan for today
+
 ## Day summary
 
 ## Energy
