@@ -30,6 +30,7 @@ flowchart LR
 | 4. Capture and replies | 0.4.0 | The user can capture a thought or snooze a ritual from a notification | M |
 | 5. Central hub | 0.5.0 | Personal, startup, and work vaults with per-agent scopes, identity, and undo | L |
 | 6. Insights | 0.6.0 | Trends and optional prepared briefs drawn from the evidence | M |
+| 7. Stabilization | 0.2.0-beta.0 | Fixes and checks found by a critical review of phases 0 to 6; no new features | M |
 
 Phases 1 and 5 can run in parallel. Phase 3 depends on Phase 2, because a reminder is only as good as the ritual state behind it.
 
@@ -339,6 +340,32 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 - **Weekly review uses it:** the "Quote dates, not impressions" rule becomes measurable.
 - **Prepared briefs (opt-in):** with the user's own API key, the tick can ask a model to draft the morning brief from `ritual_agenda` and deliver it by notification. It is off by default. The data path and provider are listed during setup, and the brief is never written to the vault without a ritual.
 - **Obsidian companion plugin:** shows ritual state and a "Start circle" command inside Obsidian.
+
+---
+
+## Phase 7: Stabilization (0.2.0-beta.0)
+
+**Goal:** make what already exists correct, safe to run, and proven before adding anything new.
+
+**Status:** done, except the live ChatGPT and Claude.ai check that still gates 0.1.0.
+
+### Delivered
+
+- **Windows scheduling.** The tick wrapper switches to UTF-8, so a path with a letter such as `ı` works under the Turkish console code page. A Windows test runs it under code page 857.
+- **CLI.** The vault ID is optional on `rituals`, `agenda`, `read`, and `list`.
+- **Docker.** Non-root user, `git`, a healthcheck, cached dependency layers, and a state volume writable for any user ID. `scripts/docker-smoke.sh` runs the image as the current user against a git vault and runs in CI.
+- **HTTP.** MCP sessions expire and are capped; an expired session gets a 404. OAuth client registration refuses new clients instead of evicting one that is connected.
+- **Locks.** Takeover of a stale lock is exclusive, holders renew their lock and release only their own, and Windows `EPERM` counts as contention. A stress test reproduced the overlap in the first attempt at this fix.
+- **Smaller fixes.** Exact request IDs in `undo`, `--` before the `notify-send` message, no `effort` setting for Haiku.
+- **Weight.** The Anthropic SDK and nodemailer load on first use, cutting the core's load time from 227 ms to 76 ms.
+- **Proof.** End-to-end tests for onboarding, inbox triage, the weekly review, vault-limited connections, and hostile note text; ESLint, `npm audit`, coverage, and Dependabot.
+
+### Still open
+
+- Live verification of the OAuth flow with ChatGPT and Claude.ai (needs real accounts and a public HTTPS host).
+- Client ID Metadata Documents, as a fallback if a client cannot use dynamic registration.
+- Splitting `packages/core/src/index.ts` (about 1,000 lines) into modules, which is a refactor with no behavior change.
+- The behavior of the skills with a real model is still not measured; the tests cover what the tools do when the skills' steps are followed.
 
 ---
 
