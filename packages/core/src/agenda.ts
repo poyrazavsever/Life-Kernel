@@ -1,4 +1,5 @@
 import { inboxItems } from "./capture.js";
+import { periodInsights } from "./insights.js";
 import { readFrontmatter } from "./frontmatter.js";
 import type { LifeKernel } from "./index.js";
 import { periodKey, periodRange, type Period } from "./periods.js";
@@ -7,7 +8,7 @@ import { readSection } from "./sections.js";
 import { parseTasks, type Task } from "./tasks.js";
 import { addDays, weekday } from "./time.js";
 
-type Kernel = Pick<LifeKernel, "config" | "readNote" | "dailyNote" | "periodNote" | "listNotes" | "openTasks">;
+export type Kernel = Pick<LifeKernel, "config" | "readNote" | "dailyNote" | "periodNote" | "listNotes" | "openTasks">;
 
 /** A section of a note, with the note it came from so the agent can cite it. */
 export interface SourcedText { source: string; text: string }
@@ -30,7 +31,7 @@ async function section(kernel: Kernel, vaultId: string, path: string, heading: s
   return text ? { source: found.path, text } : null;
 }
 
-async function daily(kernel: Kernel, vaultId: string, date: string) {
+export async function daily(kernel: Kernel, vaultId: string, date: string) {
   try {
     const found = await kernel.dailyNote(vaultId, date);
     return found.exists ? found : null;
@@ -44,7 +45,7 @@ async function period(kernel: Kernel, vaultId: string, kind: Period, date: strin
 const numeric = (value: unknown) => typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : undefined;
 const label = (value: unknown) => typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
-async function daySummary(kernel: Kernel, vaultId: string, date: string): Promise<DaySummary> {
+export async function daySummary(kernel: Kernel, vaultId: string, date: string): Promise<DaySummary> {
   const found = await daily(kernel, vaultId, date);
   const data = found ? readFrontmatter(found.content) ?? {} : {};
   const summary: DaySummary = { date, source: found?.path ?? null };
@@ -68,7 +69,7 @@ function stats(days: DaySummary[]): PeriodStats {
   };
 }
 
-function datesBetween(start: string, end: string): string[] {
+export function datesBetween(start: string, end: string): string[] {
   const dates: string[] = [];
   for (let date = start; date <= end; date = addDays(date, 1)) dates.push(date);
   return dates;
@@ -94,7 +95,7 @@ async function commitmentsOn(kernel: Kernel, vaultId: string, date: string) {
 }
 
 /** Done tasks with a completion date inside the range, from project and area notes. */
-async function completedTasks(kernel: Kernel, vaultId: string, start: string, end: string): Promise<AgendaTask[]> {
+export async function completedTasks(kernel: Kernel, vaultId: string, start: string, end: string): Promise<AgendaTask[]> {
   const done: AgendaTask[] = [];
   for (const type of ["project", "area"]) {
     for (const listed of await kernel.listNotes(vaultId, { type, limit: 200 })) {
@@ -145,7 +146,7 @@ async function reviewNote(kernel: Kernel, vaultId: string, kind: Period, date: s
  * What a ritual should cover, assembled without a model: plans, due and overdue tasks, the period's
  * daily fields, stalled projects, and goals, each with the note it came from.
  */
-export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: RitualId, date: string) {
+export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: RitualId, date: string, today: string = date) {
   const openTasks = async (dueBy: string) => (await kernel.openTasks({ vaultId, dueBy, includeUndated: false })).map(({ sha256: _hash, vaultId: _vault, ...task }) => task);
 
   if (ritual === "morning-plan" || ritual === "daily-circle") {
@@ -199,6 +200,7 @@ export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: Ritua
         return created !== undefined && created >= start && created <= end;
       }).map((outcome) => ({ path: outcome.path, title: outcome.title, source: label(outcome.frontmatter.source) ?? null })),
       previousCommitments: previousReview?.exists ? await section(kernel, vaultId, previousReview.path, "Next week's commitments") : null,
+      insights: await periodInsights(kernel, vaultId, "week", date, today),
       statedCapacity: await section(kernel, vaultId, CAPACITY, "Stated capacity"),
       observedCapacity: await section(kernel, vaultId, CAPACITY, "Observed capacity")
     };
@@ -212,6 +214,7 @@ export async function buildAgenda(kernel: Kernel, vaultId: string, ritual: Ritua
     ritual, date, period: { key: periodKey(kind, date), start, end },
     reviewNote: await reviewNote(kernel, vaultId, kind, date),
     stats: stats(days),
+    insights: await periodInsights(kernel, vaultId, kind, date, today),
     goals: await goals(kernel, vaultId)
   };
   if (kind === "month") return { ...base, weeklyReviews: await reviewNotes(kernel, vaultId, "week", dates.filter((_, index) => index % 7 === 0).concat(end)) };

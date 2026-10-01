@@ -7,6 +7,7 @@ import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontm
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
 import { type VaultGrants } from "./access.js";
 import { buildAgenda } from "./agenda.js";
+import { periodInsights, type Insights } from "./insights.js";
 import { replaceFile, withFileLock } from "./files.js";
 import { commitPaths, contentBefore, type HistoryResult } from "./history.js";
 import { ritualCalendar } from "./ics.js";
@@ -20,6 +21,7 @@ export { periodKey, periodRange, PERIODS, type Period } from "./periods.js";
 export { parseTasks, type Task, type TaskPriority, type TaskStatus } from "./tasks.js";
 export { readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 export { readSection, replaceSection } from "./sections.js";
+export type { Insights, RitualConsistency } from "./insights.js";
 export { createAgentToken, findAgentToken, grantScopes, grantsFromScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, type AgentToken, type VaultGrants } from "./access.js";
 export { capture, inboxItems, type CaptureResult, type InboxNote } from "./capture.js";
 export { actionLink, actionSecret, verifyAction, NUDGE_ACTIONS, type NudgeAction } from "./actions.js";
@@ -533,6 +535,17 @@ export class LifeKernel {
     return report;
   }
 
+  /**
+   * Deterministic insights for the week, month, or quarter containing a date (default today): energy and its
+   * weekday pattern, focus against stated capacity, ritual consistency, and tasks planned again and again.
+   */
+  async insights(vaultId: string, options: { period?: "week" | "month" | "quarter"; date?: string } = {}): Promise<Insights> {
+    const vault = this.vault(vaultId);
+    const date = options.date ?? this.today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
+    return periodInsights(this, vault.id, options.period ?? "week", date, this.today());
+  }
+
   /** The ritual schedule as an iCalendar feed: names and times only, never note content. */
   async ritualCalendar(vaultId: string): Promise<string> {
     const vault = this.vault(vaultId);
@@ -547,7 +560,7 @@ export class LifeKernel {
     if (!(RITUAL_IDS as readonly string[]).includes(ritual)) throw new Error(`Unknown ritual: ${ritual}. Known: ${RITUAL_IDS.join(", ")}.`);
     const date = options.date ?? this.today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be YYYY-MM-DD.");
-    return buildAgenda(this, vault.id, ritual, date);
+    return buildAgenda(this, vault.id, ritual, date, this.today());
   }
 
   /** List notes by frontmatter. Notes without the filtered value are left out. */
