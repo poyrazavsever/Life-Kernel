@@ -137,6 +137,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   app.post("/v1/tasks", ...read, async (req, res, next) => { try { res.json(await view(req).openTasks(req.body ?? {})); } catch (e) { next(e); } });
   app.post("/v1/rituals/status", ...read, async (req, res, next) => { try { res.json(await view(req).ritualStatus(req.body.vaultId)); } catch (e) { next(e); } });
   app.post("/v1/rituals/agenda", ...read, async (req, res, next) => { try { res.json(await view(req).ritualAgenda(req.body.vaultId, req.body.ritual, { date: req.body.date })); } catch (e) { next(e); } });
+  app.post("/v1/insights", ...read, async (req, res, next) => { try { res.json(await view(req).insights(req.body.vaultId, { period: req.body.period, date: req.body.date })); } catch (e) { next(e); } });
   app.post("/v1/backlinks", ...read, async (req, res, next) => { try { res.json(await view(req).backlinks(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false, req.body.limit)); } catch (e) { next(e); } });
   app.post("/v1/validate", ...read, async (req, res, next) => { try { res.json(await view(req).validate(req.body?.vaultId)); } catch (e) { next(e); } });
   app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await view(req).previewWrite(req.body)); } catch (e) { next(e); } });

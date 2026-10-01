@@ -70,6 +70,14 @@ ${content}
     process.stdout.write(`${formatToday(summary, kernel.config.notifications?.locale ?? "en")}\n`);
     return;
   }
+  if (command === "insights") {
+    const kind = positional()[0] ?? "week";
+    if (kind !== "week" && kind !== "month" && kind !== "quarter") throw new Error("Usage: lifekernel insights [week|month|quarter] [YYYY-MM-DD] [--vault id]");
+    const insights = await kernel.insights(flag("--vault") ?? notificationsVault(kernel), { period: kind, ...(positional()[1] ? { date: positional()[1]! } : {}) });
+    if (args.includes("--json")) return output(insights);
+    process.stdout.write(`${insights.period.key} (${insights.period.start} to ${insights.period.through})\n${insights.observations.map((line) => `- ${line}`).join("\n") || "- Not enough recorded days for observations yet."}\n`);
+    return;
+  }
   if (command === "undo") {
     if (!args[0] || args[0].startsWith("--")) throw new Error("Usage: lifekernel undo <requestId> [--apply]");
     return output(await kernel.undo(args[0], { apply: args.includes("--apply") }));
@@ -115,7 +123,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 
@@ -130,7 +138,7 @@ function flag(name: string): string | undefined {
 
 /** Arguments that are neither flags nor flag values. */
 function positional(): string[] {
-  return args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && args[index - 1]!.startsWith("--") && ["--template", "--id", "--every", "--config", "--vaults"].includes(args[index - 1]!)));
+  return args.filter((arg, index) => !arg.startsWith("--") && !(index > 0 && args[index - 1]!.startsWith("--") && ["--template", "--id", "--every", "--config", "--vaults", "--vault"].includes(args[index - 1]!)));
 }
 
 type ConfigFile = { timezone?: string; vaults: Array<{ id: string; kind: string; path: string; mode: string; routes: Record<string, unknown> }> } & Record<string, unknown>;

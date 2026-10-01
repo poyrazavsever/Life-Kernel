@@ -70,6 +70,8 @@ try {
   if (!calendar.startsWith("BEGIN:VCALENDAR") || calendar.includes("BEGIN:VEVENT")) throw new Error("a fresh vault's calendar should be empty");
   const today = run("today", "--json");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(today.date) || today.focus !== null) throw new Error(`today looks wrong for a fresh vault: ${JSON.stringify(today)}`);
+  const insights = run("insights", "week", "--json");
+  if (insights.period.kind !== "week" || insights.days.recorded !== 0 || insights.observations.length !== 0) throw new Error(`a fresh vault should have empty insights: ${JSON.stringify(insights)}`);
   const broken = await brokenLinks(join(work, "vaults/personal"));
   if (broken.length) throw new Error(`broken wikilinks: ${broken.join("; ")}`);
   process.stdout.write(`fixture ok: ${validation.notes} notes validated\n`);
