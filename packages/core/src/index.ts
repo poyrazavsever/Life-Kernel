@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parseEnv } from "node:util";
 import { z } from "zod";
 import { detectEol, frontmatterBlock, frontmatterEnd, readFrontmatter, setFrontmatter, type FieldValue } from "./frontmatter.js";
 import { PERIODS, periodKey, periodRange, type Period } from "./periods.js";
@@ -284,9 +285,33 @@ async function markdownFiles(root: string): Promise<string[]> {
   return output;
 }
 
+/**
+ * Read `KEY=value` lines from a `.env` file beside the config into `process.env`, without overriding
+ * variables that are already set. Scheduled tasks start without the user's shell, so secrets such as
+ * the ntfy topic reach them this way. Returns the keys it set.
+ */
+export async function loadEnvBeside(configPath: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+  let text: string;
+  try { text = await readFile(join(dirname(resolve(configPath)), ".env"), "utf8"); } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const loaded: string[] = [];
+  for (const [key, value] of Object.entries(parseEnv(text))) {
+    if (env[key] !== undefined) continue;
+    env[key] = value;
+    loaded.push(key);
+  }
+  return loaded;
+}
+
 export async function loadConfig(configPath: string): Promise<LifeKernelConfig> {
   const absoluteConfig = resolve(configPath);
-  const raw = JSON.parse(await readFile(absoluteConfig, "utf8")) as unknown;
+  const text = await readFile(absoluteConfig, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+    throw new Error(`No config at ${absoluteConfig}. Run "npm run cli -- init" to create one, copy lifekernel.config.example.json to lifekernel.config.json, or point LIFEKERNEL_CONFIG or --config at your config.`);
+  });
+  const raw = JSON.parse(text) as unknown;
   const parsed = ConfigSchema.parse(raw);
   const base = dirname(absoluteConfig);
   return {

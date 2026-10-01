@@ -704,3 +704,21 @@ describe("rituals", () => {
     await expect(kernel.ritualAgenda("test", "evening" as never)).rejects.toThrow(/Unknown ritual/);
   });
 });
+
+describe("config files", () => {
+  it("explains a missing config instead of failing with ENOENT", async () => {
+    const { root } = await fixture();
+    const { loadConfig } = await import("./index.js");
+    await expect(loadConfig(join(root, "missing.json"))).rejects.toThrow(/No config at .*missing\.json\. Run "npm run cli -- init"/);
+  });
+
+  it("loads a .env beside the config without overriding variables already set", async () => {
+    const { root } = await fixture();
+    const { loadEnvBeside } = await import("./index.js");
+    await writeFile(join(root, ".env"), "# reminders\nLIFEKERNEL_NTFY_TOPIC=lk-topic\nALREADY=from-file\nQUOTED=\"two words\"\n", "utf8");
+    const env: NodeJS.ProcessEnv = { ALREADY: "from-shell" };
+    expect(await loadEnvBeside(join(root, "lifekernel.config.json"), env)).toEqual(["LIFEKERNEL_NTFY_TOPIC", "QUOTED"]);
+    expect(env).toEqual({ ALREADY: "from-shell", LIFEKERNEL_NTFY_TOPIC: "lk-topic", QUOTED: "two words" });
+    expect(await loadEnvBeside(join(root, "elsewhere", "c.json"), {})).toEqual([]);
+  });
+});
