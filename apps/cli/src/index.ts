@@ -70,6 +70,10 @@ ${content}
     process.stdout.write(`${formatToday(summary, kernel.config.notifications?.locale ?? "en")}\n`);
     return;
   }
+  if (command === "undo") {
+    if (!args[0] || args[0].startsWith("--")) throw new Error("Usage: lifekernel undo <requestId> [--apply]");
+    return output(await kernel.undo(args[0], { apply: args.includes("--apply") }));
+  }
   if (command === "token") {
     const stateDir = kernel.config.stateDir;
     if (args[0] === "list") return output(await listAgentTokens(stateDir));
@@ -111,7 +115,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 
