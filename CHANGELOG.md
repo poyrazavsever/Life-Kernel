@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-beta.0 (2026-10-01)
+
+Everything built since 0.1.0-alpha.0, in roadmap phases 0 to 7. 0.1.0 is withheld until ChatGPT and Claude.ai have been verified against a live account; the OAuth flow itself is covered by automated tests.
 
 Stabilization (roadmap phase 7).
 
@@ -13,10 +15,6 @@ Stabilization (roadmap phase 7).
 - Fix: briefs no longer send the `effort` setting to Haiku, which rejects it.
 - The Anthropic SDK and nodemailer load on first use; loading the core dropped from 227 ms to 76 ms.
 - Tests: onboarding, inbox triage, the weekly review, vault-limited connections, and hostile note text now run end to end through an MCP client. ESLint, `npm audit`, coverage, Dependabot, and a Docker smoke test run in CI.
-
-## 0.2.0-beta.0 (2026-10-01)
-
-Everything built since 0.1.0-alpha.0, in roadmap phases 0 to 6. 0.1.0 is withheld until ChatGPT and Claude.ai have been verified against a live account; the OAuth flow itself is covered by automated tests.
 
 Insights (roadmap phase 6).
 
