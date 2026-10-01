@@ -30,14 +30,14 @@ async function start() {
     return fetch(`${base}/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: [redirect], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], client_name: "Claude" }) });
   }
 
-  async function connect(options: { write: boolean; secret?: string; deny?: boolean }) {
+  async function connect(options: { write: boolean; secret?: string; deny?: boolean; extra?: Record<string, string> }) {
     const client = await (await register()).json() as { client_id: string };
     const verifier = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     const params = new URLSearchParams({ response_type: "code", client_id: client.client_id, redirect_uri: callback, code_challenge: challenge, code_challenge_method: "S256", state: "xyz", resource: `${base}/mcp`.replace(/^http:\/\/127\.0\.0\.1:\d+/, "http://localhost") });
     const page = await (await fetch(`${base}/authorize?${params}`)).text();
     const request = page.match(/name="request" value="([^"]+)"/)![1]!;
-    const consent = await fetch(`${base}/oauth/consent`, form({ request, decision: options.deny ? "deny" : "approve", secret: options.secret ?? ownerSecret, ...(options.write ? { write: "1" } : {}) }));
+    const consent = await fetch(`${base}/oauth/consent`, form({ request, decision: options.deny ? "deny" : "approve", secret: options.secret ?? ownerSecret, ...(options.write ? { write: "1" } : {}), ...options.extra }));
     return { client, verifier, page, request, consent, params };
   }
 
@@ -206,6 +206,23 @@ describe("real MCP client over HTTP with an OAuth token", () => {
       const [event] = await s.kernel.recentAudit(1);
       expect(event).toMatchObject({ event: "write_applied", client: { id: flow.client.client_id, name: "t" } });
       await c.close();
+    } finally { await s.close(); }
+  });
+
+  it("limits a vault to reading when the owner chooses so on the consent page", async () => {
+    const s = await start();
+    try {
+      const flow = await s.connect({ write: true, extra: { vault_test: "read" } });
+      const issued = (await s.tokens(flow)).body;
+      expect(issued.scope?.split(" ")).toEqual(expect.arrayContaining(["lifekernel:write", "vault:test:read"]));
+      expect(issued.scope).not.toContain("vault:test:write");
+      const c = await client(s.base, issued.access_token!);
+      const applied = await c.callTool({ name: "write_apply", arguments: { request: { ...request, requestId: "remote-vault-01" } } });
+      expect(applied.isError).toBe(true);
+      expect((applied.content as Array<{ text: string }>)[0]!.text).toMatch(/read-only/);
+      await c.close();
+      const none = await s.connect({ write: true, extra: { vault_test: "none" } });
+      expect(none.consent.status).toBe(400);
     } finally { await s.close(); }
   });
 

@@ -7,7 +7,7 @@ import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelconte
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { capture, notificationsVault, performLinkedAction, type LifeKernel } from "@lifekernel/core";
+import { capture, findAgentToken, grantsFromScopes, notificationsVault, performLinkedAction, type LifeKernel } from "@lifekernel/core";
 import { LifeKernelOAuth, type OAuthOptions } from "./oauth.js";
 import { ALL_SCOPES, SCOPE_CAPTURE, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
 import { createLifeKernelMcp } from "./server.js";
@@ -36,7 +36,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   if (calendarToken !== undefined && calendarToken === token) throw new Error("LIFEKERNEL_CALENDAR_TOKEN must differ from LIFEKERNEL_API_TOKEN.");
   if (token === undefined && !oauth) throw new Error("Set LIFEKERNEL_API_TOKEN or configure OAuth (LIFEKERNEL_PUBLIC_URL and LIFEKERNEL_OWNER_SECRET).");
 
-  const provider = oauth ? new LifeKernelOAuth(oauth) : undefined;
+  const provider = oauth ? new LifeKernelOAuth({ vaults: kernel.config.vaults.map((vault) => vault.id), ...oauth }) : undefined;
   const loopbackHosts = ["localhost", "127.0.0.1", "[::1]"];
   const app = createMcpExpressApp({ host, ...(oauth ? { allowedHosts: [oauth.publicUrl.hostname, ...loopbackHosts] } : {}) });
   if (oauth) app.set("trust proxy", 1);
@@ -76,6 +76,9 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
       if (captureToken !== undefined && safeEqual(candidate, captureToken)) {
         return { token: candidate, clientId: "capture-token", scopes: [SCOPE_CAPTURE], expiresAt: Math.floor(Date.now() / 1000) + 3600 };
       }
+      // Named agent tokens from `lifekernel token create`, each with its own scopes and vault grants.
+      const agent = await findAgentToken(kernel.config.stateDir, candidate);
+      if (agent) return { token: candidate, clientId: `token:${agent.name}`, scopes: agent.scopes, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
       if (provider) return provider.verifyAccessToken(candidate);
       throw new InvalidTokenError("Invalid token.");
     }
@@ -95,6 +98,12 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   const read = [...protect, needs(SCOPE_READ)];
   const write = [...protect, needs(SCOPE_WRITE)];
 
+  // Each request sees only the vaults its token was granted; a token without vault grants sees them all.
+  const view = (req: Request): LifeKernel => {
+    const grants = grantsFromScopes(req.auth?.scopes ?? []);
+    return grants ? kernel.restrictTo(grants) : kernel;
+  };
+
   // Capture needs the capture scope (the capture token) or full write access.
   const captureAccess: RequestHandler = (req, res, next) => {
     if (!req.auth?.scopes.some((scope) => scope === SCOPE_CAPTURE || scope === SCOPE_WRITE)) return void res.status(403).json({ error: "insufficient_scope", error_description: "This connection cannot add to the inbox." });
@@ -104,7 +113,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
     try {
       if (typeof req.body?.text !== "string") return void res.status(400).json({ error: "Send JSON with a text field." });
       const requestId = typeof req.body.requestId === "string" ? req.body.requestId : undefined;
-      res.json(await capture(kernel, typeof req.body.vaultId === "string" ? req.body.vaultId : notificationsVault(kernel), req.body.text, { source: typeof req.body.source === "string" ? req.body.source : "api", ...(requestId ? { requestId } : {}), context: { client: { id: req.auth!.clientId } } }));
+      res.json(await capture(view(req), typeof req.body.vaultId === "string" ? req.body.vaultId : notificationsVault(kernel), req.body.text, { source: typeof req.body.source === "string" ? req.body.source : "api", ...(requestId ? { requestId } : {}), context: { client: { id: req.auth!.clientId } } }));
     } catch (e) { next(e); }
   });
 
@@ -118,20 +127,20 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
     }
   });
 
-  app.get("/v1/vaults", ...read, (_req, res) => res.json(kernel.listVaults()));
-  app.post("/v1/search", ...read, async (req, res, next) => { try { res.json(await kernel.search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false, { type: req.body.type, status: req.body.status })); } catch (e) { next(e); } });
-  app.post("/v1/read", ...read, async (req, res, next) => { try { res.json(await kernel.readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
-  app.post("/v1/daily", ...read, async (req, res, next) => { try { res.json(await kernel.dailyNote(req.body.vaultId, req.body.date, req.body.route)); } catch (e) { next(e); } });
-  app.post("/v1/context", ...read, async (req, res, next) => { try { res.json(await kernel.contextBundle(req.body.vaultId, req.body)); } catch (e) { next(e); } });
-  app.post("/v1/period", ...read, async (req, res, next) => { try { res.json(await kernel.periodNote(req.body.vaultId, { route: req.body.route, period: req.body.period, date: req.body.date })); } catch (e) { next(e); } });
-  app.post("/v1/notes", ...read, async (req, res, next) => { try { res.json(await kernel.listNotes(req.body.vaultId, req.body)); } catch (e) { next(e); } });
-  app.post("/v1/tasks", ...read, async (req, res, next) => { try { res.json(await kernel.openTasks(req.body ?? {})); } catch (e) { next(e); } });
-  app.post("/v1/rituals/status", ...read, async (req, res, next) => { try { res.json(await kernel.ritualStatus(req.body.vaultId)); } catch (e) { next(e); } });
-  app.post("/v1/rituals/agenda", ...read, async (req, res, next) => { try { res.json(await kernel.ritualAgenda(req.body.vaultId, req.body.ritual, { date: req.body.date })); } catch (e) { next(e); } });
-  app.post("/v1/backlinks", ...read, async (req, res, next) => { try { res.json(await kernel.backlinks(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false, req.body.limit)); } catch (e) { next(e); } });
-  app.post("/v1/validate", ...read, async (req, res, next) => { try { res.json(await kernel.validate(req.body?.vaultId)); } catch (e) { next(e); } });
-  app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await kernel.previewWrite(req.body)); } catch (e) { next(e); } });
-  app.post("/v1/writes/apply", ...write, async (req, res, next) => { try { res.json(await kernel.applyWrite(req.body, { client: { id: req.auth!.clientId } })); } catch (e) { next(e); } });
+  app.get("/v1/vaults", ...read, (req, res) => res.json(view(req).listVaults()));
+  app.post("/v1/search", ...read, async (req, res, next) => { try { res.json(await view(req).search(req.body.query, req.body.vaultId, req.body.limit, req.body.includeRestricted ?? false, { type: req.body.type, status: req.body.status })); } catch (e) { next(e); } });
+  app.post("/v1/read", ...read, async (req, res, next) => { try { res.json(await view(req).readNote(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false)); } catch (e) { next(e); } });
+  app.post("/v1/daily", ...read, async (req, res, next) => { try { res.json(await view(req).dailyNote(req.body.vaultId, req.body.date, req.body.route)); } catch (e) { next(e); } });
+  app.post("/v1/context", ...read, async (req, res, next) => { try { res.json(await view(req).contextBundle(req.body.vaultId, req.body)); } catch (e) { next(e); } });
+  app.post("/v1/period", ...read, async (req, res, next) => { try { res.json(await view(req).periodNote(req.body.vaultId, { route: req.body.route, period: req.body.period, date: req.body.date })); } catch (e) { next(e); } });
+  app.post("/v1/notes", ...read, async (req, res, next) => { try { res.json(await view(req).listNotes(req.body.vaultId, req.body)); } catch (e) { next(e); } });
+  app.post("/v1/tasks", ...read, async (req, res, next) => { try { res.json(await view(req).openTasks(req.body ?? {})); } catch (e) { next(e); } });
+  app.post("/v1/rituals/status", ...read, async (req, res, next) => { try { res.json(await view(req).ritualStatus(req.body.vaultId)); } catch (e) { next(e); } });
+  app.post("/v1/rituals/agenda", ...read, async (req, res, next) => { try { res.json(await view(req).ritualAgenda(req.body.vaultId, req.body.ritual, { date: req.body.date })); } catch (e) { next(e); } });
+  app.post("/v1/backlinks", ...read, async (req, res, next) => { try { res.json(await view(req).backlinks(req.body.vaultId, req.body.path, req.body.includeRestricted ?? false, req.body.limit)); } catch (e) { next(e); } });
+  app.post("/v1/validate", ...read, async (req, res, next) => { try { res.json(await view(req).validate(req.body?.vaultId)); } catch (e) { next(e); } });
+  app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await view(req).previewWrite(req.body)); } catch (e) { next(e); } });
+  app.post("/v1/writes/apply", ...write, async (req, res, next) => { try { res.json(await view(req).applyWrite(req.body, { client: { id: req.auth!.clientId } })); } catch (e) { next(e); } });
 
   // A session belongs to the client that initialized it.
   const sessions = new Map<string, { transport: StreamableHTTPServerTransport; clientId: string }>();
@@ -148,7 +157,7 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
           onsessioninitialized: (id) => { sessions.set(id, { transport: transport!, clientId }); }
         });
         transport.onclose = () => { if (transport?.sessionId) sessions.delete(transport.sessionId); };
-        await createLifeKernelMcp(kernel).connect(transport);
+        await createLifeKernelMcp(view(req)).connect(transport);
       }
       if (!transport) return void res.status(400).json({ error: "Missing or invalid MCP session." });
       await transport.handleRequest(req, res, req.body);

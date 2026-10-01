@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { LifeKernel, type LifeKernelConfig } from "@lifekernel/core";
@@ -77,6 +78,31 @@ describe("HTTP surface", () => {
       expect(ok.status).toBe(200);
       expect(await ok.json()).toEqual([{ id: "test", kind: "personal", mode: "read-write", routes: [{ name: "daily", folder: "daily", type: "daily", policy: "auto", period: "day", fields: [] }] }]);
     } finally { await close(); }
+  });
+
+  it("gives a named agent token only its granted vaults and names it in the audit log", async () => {
+    const kernel = await fixture();
+    const other = join(kernel.config.vaults[0]!.path, "..", "startup");
+    await mkdir(join(other, "sessions"), { recursive: true });
+    kernel.config.vaults.push({ id: "startup", kind: "startup", path: other, mode: "read-write", routes: { session: { folder: "sessions", type: "session", status: "active", area: "x", policy: "auto" } } });
+    const { createAgentToken } = await import("@lifekernel/core");
+    const coder = await createAgentToken(kernel.config.stateDir, "coder", ["lifekernel:read", "lifekernel:write", "vault:startup:read", "vault:startup:write"]);
+    const app = createHttpApp(kernel, { token });
+    const server = await new Promise<import("node:http").Server>((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const call = (path: string, body?: unknown) => fetch(`${base}${path}`, { method: body ? "POST" : "GET", headers: { authorization: `Bearer ${coder.token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    try {
+      expect((await (await call("/v1/vaults")).json()).map((vault: { id: string }) => vault.id)).toEqual(["startup"]);
+      const denied = await call("/v1/read", { vaultId: "test", path: "note.md" });
+      expect(denied.status).toBe(400);
+      expect((await denied.json()).error).toMatch(/Unknown vault: test/);
+      expect(await (await call("/v1/search", { query: "needle" })).json()).toEqual([]);
+      const applied = await call("/v1/writes/apply", { requestId: "coder-0001", vaultId: "startup", operation: "create", route: "session", title: "Work", body: "Done.", source: "agent", sourceDate: "2026-10-01" });
+      expect(applied.status).toBe(200);
+      const [event] = await kernel.recentAudit(1);
+      expect(event).toMatchObject({ vaultId: "startup", client: { id: "token:coder" } });
+      expect((await fetch(`${base}/v1/vaults`, { headers: { authorization: `Bearer ${token}` } }).then((res) => res.json())).map((vault: { id: string }) => vault.id)).toEqual(["test", "startup"]);
+    } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
   });
 
   it("lets the capture token add to the inbox and nothing else, and runs signed links once", async () => {
@@ -182,5 +208,31 @@ describe("skills over MCP", () => {
       for (const [, tool] of text.matchAll(/`((?:vault|note|write|daily|period|tasks|ritual|context|audit|skill)_[a-z_]+)`/g)) expect(tools.has(tool!) || fields.has(tool!), `${name} mentions unknown tool ${tool}`).toBe(true);
       for (const [, route] of text.matchAll(/routes? `([a-z]+)`/g)) expect(routes.has(route!), `${name} mentions unknown route ${route}`).toBe(true);
     }
+  });
+});
+
+describe("stdio vault grants", () => {
+  it("limits a local client to LIFEKERNEL_VAULTS", async () => {
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const kernel = await fixture();
+    const root = join(kernel.config.vaults[0]!.path, "..");
+    await mkdir(join(root, "startup"));
+    await writeFile(join(root, "lifekernel.config.json"), JSON.stringify({ version: 1, stateDir: "./state", timezone: "UTC", vaults: [
+      { id: "personal", kind: "personal", path: "./vault", mode: "read-write" },
+      { id: "startup", kind: "startup", path: "./startup", mode: "read-write" }
+    ] }));
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL("../dist/stdio.js", import.meta.url))],
+      env: { ...process.env as Record<string, string>, LIFEKERNEL_CONFIG: join(root, "lifekernel.config.json"), LIFEKERNEL_VAULTS: "startup:read" }
+    });
+    const client = new Client({ name: "coder", version: "0.0.0" });
+    await client.connect(transport);
+    try {
+      const listed = JSON.parse((await client.callTool({ name: "vault_list", arguments: {} }) as { content: Array<{ text: string }> }).content[0]!.text);
+      expect(listed).toEqual([expect.objectContaining({ id: "startup", mode: "read-only" })]);
+      const read = await client.callTool({ name: "note_read", arguments: { vaultId: "personal", path: "note.md" } });
+      expect(read.isError).toBe(true);
+    } finally { await client.close(); }
   });
 });
