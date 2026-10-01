@@ -37,7 +37,7 @@ flowchart LR
 - **Source-backed:** search results include file, line, and SHA-256 provenance.
 - **Controlled writes:** routes, previews, request IDs, expected hashes, and audit events guard mutations.
 - **Portable behavior:** skills define onboarding, the morning plan, the daily circle, weekly, monthly, and quarterly reviews, and project memory.
-- **Rituals that keep their rhythm:** the server knows when each ritual is due and what it should cover, so every connected agent can offer it at the right time. Optional reminders reach your phone (ntfy), desktop, webhook, or calendar.
+- **Rituals that keep their rhythm:** the server knows when each ritual is due and what it should cover, so every connected agent can offer it at the right time. Optional reminders reach your phone (ntfy or Telegram, with snooze and skip buttons), desktop, email, webhook, or calendar, and you can capture a thought into the inbox from Telegram, a phone shortcut, or the CLI.
 
 ## Quick start
 

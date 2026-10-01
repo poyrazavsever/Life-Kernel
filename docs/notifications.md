@@ -70,6 +70,25 @@ Channels are listed under `notifications` in `lifekernel.config.json`. Secrets n
 
 `{ "type": "webhook" }` posts JSON to `LIFEKERNEL_WEBHOOK_URL` (https) for n8n, Home Assistant, Slack, or your own service. When `LIFEKERNEL_WEBHOOK_SECRET` is set, each request carries `x-lifekernel-timestamp` and `x-lifekernel-signature: sha256=<HMAC-SHA256 of "<timestamp>.<body>">`. Reject requests whose signature does not match or whose timestamp is old.
 
+### Telegram
+
+A Telegram bot sends reminders with **Start**, **Snooze 1h**, and **Skip** buttons, and it listens: anything you write to it goes to your inbox, and it answers `/today`, `/status`, `/snooze <ritual> [minutes]`, and `/skip <ritual> [reason]`. It only ever reads and answers your own chat.
+
+1. In Telegram, open **@BotFather**, send `/newbot`, and follow the steps. Copy the token it gives you into `.env` as `LIFEKERNEL_TELEGRAM_TOKEN`. Treat it like a password.
+2. Add `{ "type": "telegram" }` to `channels`.
+3. Send any message to your new bot, then run `npm run cli -- telegram setup` and put your chat's `id` in `.env` as `LIFEKERNEL_TELEGRAM_CHAT_ID`.
+4. Run `npm run cli -- notify test`.
+
+Replies are read by every `tick`, so locally a button press takes effect at the next check (within five minutes). With `LIFEKERNEL_SCHEDULER=on`, the server listens continuously and replies take seconds.
+
+### Email
+
+`{ "type": "email", "rituals": ["weekly-review", "monthly-review", "quarterly-review"] }` suits the longer reviews. Set `LIFEKERNEL_SMTP_URL` (for example `smtps://user:password@mail.example.com`; plain `smtp://` must offer STARTTLS unless it is localhost), `LIFEKERNEL_EMAIL_FROM`, and `LIFEKERNEL_EMAIL_TO`. URL-encode special characters in the password.
+
+### Buttons on ntfy
+
+In remote mode, set `"actionBaseUrl": "https://<your host>"` under `notifications`. ntfy reminders then carry **Snooze 1h** and **Skip** buttons. Each button is a signed link that works once, expires after a day, and does nothing for an earlier day's reminder. The signing key is generated in the state directory, or set `LIFEKERNEL_ACTION_SECRET` (32+ characters); changing it invalidates every link already sent.
+
 ## 3. Run the check every few minutes
 
 `lifekernel tick` checks the rituals once and sends what is due. It is safe to run as often as you like: it remembers what it sent in `nudges.json` in the state directory. Preview without sending:
@@ -98,6 +117,16 @@ npm run cli -- resume
 ```
 
 A skip is written to the daily or review note as evidence for the next review, and the ritual stops being due. It is not counted as a failure.
+
+## Capture a thought
+
+Anything you capture lands in today's inbox note (`inbox/2026-10-01.md`) as `- 21:40 text (source)`, and the next daily circle offers to file it.
+
+- **CLI:** `npm run cli -- capture Call the accountant about Q4`
+- **Telegram:** write to your bot.
+- **Phone shortcut or automation (remote mode):** set `LIFEKERNEL_CAPTURE_TOKEN` (24+ characters, different from your other tokens) and send `POST https://<your host>/v1/capture` with `Authorization: Bearer <capture token>` and JSON `{ "text": "...", "source": "shortcut" }`. That token can add to the inbox and do nothing else. Pass a unique `requestId` to make retries safe.
+
+`npm run cli -- today` prints the day at a glance: the focus, due and overdue tasks, the inbox count, and ritual states.
 
 ## Calendar
 

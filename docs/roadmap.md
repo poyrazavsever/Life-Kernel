@@ -291,6 +291,8 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 
 **Goal:** the user can act on a reminder and drop a thought into the vault without opening an AI client.
 
+**Status:** done. `lifekernel status` is the existing `lifekernel rituals`. Capture uses a dedicated capture-only token instead of an OAuth scope, because phone shortcuts and automations cannot run an OAuth flow. Telegram, email, and ntfy buttons are tested against fake APIs and local servers, not yet against live accounts.
+
 - **Quick capture:** `lifekernel capture "Call the accountant about Q4"`, `POST /v1/capture` (scope `lifekernel:capture`), and Telegram messages to the bot. Each one appends to a dated inbox note through the `inbox` route.
 - **Inbox triage:** `ritual_agenda` lists unprocessed inbox items. The daily circle offers to file each one into a project, area, or task, or to drop it.
 - **Action buttons:** Snooze 1h, Skip today, and Start. Buttons use short-lived, single-use signed URLs (`/v1/nudges/{id}/{action}?sig=`). Telegram uses inline buttons.

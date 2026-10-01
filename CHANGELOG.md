@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+Capture and replies (roadmap phase 4).
+
+- Capture: `lifekernel capture`, `POST /v1/capture` (with full write access or the new capture-only `LIFEKERNEL_CAPTURE_TOKEN`), and Telegram messages append to today's inbox note. Redelivered requests are not written twice; concurrent captures are retried.
+- The morning plan and daily circle list open inbox items; the circle offers to file each one and marks the inbox note processed.
+- Snooze and skip buttons: signed, single-use, day-long links on ntfy reminders (`notifications.actionBaseUrl`), and callback buttons on Telegram.
+- Telegram channel: reminders with Start, Snooze, and Skip; `/today`, `/status`, `/snooze`, `/skip`; only the owner's chat is answered. `lifekernel telegram setup` finds the chat ID.
+- Email channel over smtps or STARTTLS (nodemailer 10).
+- `lifekernel today` prints the focus, due and overdue tasks, inbox count, and rituals.
+- The inbox route keeps one note per day; a daily-note lookup prefers the route typed `daily`.
+
 - `lifekernel init` writes `lifekernel.config.json` for the new vault when none exists, with the computer's time zone. A missing config now produces instructions instead of a bare ENOENT.
 - The CLI, the stdio server, and the HTTP server read a `.env` file beside the config without overriding variables already set, so scheduled reminder checks see the ntfy topic and other secrets.
 - `vaults/` is ignored by Git, so a vault created inside the checkout is never committed.
