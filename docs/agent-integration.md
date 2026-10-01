@@ -52,6 +52,10 @@ The modifying operations require `targetPath` and the `expectedSha256` from the 
 
 A route whose `type` is `daily` always creates `<folder>/<sourceDate>.md`, so a date can have only one note regardless of title. Call `daily_get` (MCP) or `POST /v1/daily` first: it returns the note with its hash when it exists, so the agent updates it with `update_section` or `append`, and otherwise reports `exists: false` so the agent creates it. The date defaults to today in the configured `timezone`.
 
+## Vault grants
+
+A connection may be limited to some vaults: `LIFEKERNEL_VAULTS` for a local stdio client, a named token from `lifekernel token create --vaults`, or the OAuth consent page. Ungranted vaults are absent from every tool and endpoint (`Unknown vault`), and vaults granted for reading report `mode: read-only` in `vault_list`. A route with `rollup: true` in `vault_list` takes only short, linked outcomes.
+
 ## Periodic notes
 
 A route with `period` (`day`, `week`, `month`, or `quarter`) keeps one note per period, named by its key: `2026-10-01`, `2026-W40` (ISO week, Monday to Sunday), `2026-10`, or `2026-Q4`. Routes of type `daily` default to `day`. `create` derives the key from `sourceDate`, so a second note for the same period fails. `period_get` (MCP) or `POST /v1/period` takes `route` or `period` and an optional `date`, and returns the note with its hash, or `exists: false`, along with the period's `key`, `start`, and `end`.

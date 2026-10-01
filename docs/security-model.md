@@ -25,6 +25,10 @@ Current controls:
 - reminder actions: snooze and skip links are HMAC-signed over the ritual, action, occurrence, expiry, and a random nonce; each works once (the nonce is recorded), expires after a day, and does nothing for a past occurrence; the key comes from `LIFEKERNEL_ACTION_SECRET` or a random file in the state directory;
 - Telegram: only updates from `LIFEKERNEL_TELEGRAM_CHAT_ID` are acted on; others are ignored; the bot token is never written to errors or the audit log; captures from Telegram are idempotent by update ID;
 - email: SMTP requires TLS (smtps, or STARTTLS on smtp) except on localhost, file and URL access in messages is disabled, and delivery errors report a code, never the SMTP URL;
+- vault grants: a connection limited by `LIFEKERNEL_VAULTS`, a named agent token, or the OAuth consent page runs on a kernel view in which ungranted vaults do not exist and read-only grants cannot be written; grants name vaults that must exist, so a typo fails instead of granting nothing; tokens without vault grants keep access to every vault;
+- named agent tokens are stored only as SHA-256 hashes in the state directory, compared in constant time, and revocable one by one; their writes appear in the audit log as `token:<name>`;
+- rollup routes accept only short, linked outcomes (at most 600 characters, a link to the source, no later edits), so a project agent cannot copy detailed project history into the personal vault;
+- git history: commits name the request, route, source, and client but never note text, and only the written path is committed; `undo` is an owner CLI action that refuses when the note changed after the write or when the write was a create, and is audited;
 - the calendar feed uses its own token, which must differ from the API token and grants only ritual names and times; because calendar apps cannot send headers, it travels in the URL, so treat the feed URL as a secret and rotate the token if it leaks;
 - no delete, rename, shell, or arbitrary-path mutation. `lifekernel migrate` edits templates and the vault marker outside any route, but only from the owner's CLI; it is not an agent tool, and it is audited.
 

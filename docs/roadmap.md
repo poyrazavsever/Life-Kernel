@@ -310,6 +310,8 @@ Each channel is a small adapter with the interface `Notifier.send(message) → r
 
 **Goal:** one owner runs personal, startup, and work vaults, and every agent sees only what it should.
 
+**Status:** done except the Turkish starter, which is deferred until it is needed. Changes from the plan: rollups are a route option (`rollup: true`) rather than a route type, so any vault can receive them; remote agents get named, revocable tokens in addition to OAuth grants; undo never reverses a create, because that would delete a note; Zed is left out because its MCP configuration format is still changing.
+
 - **Vault templates:** `lifekernel init --template personal | startup | work`.
   - The startup template covers vision, OKRs, customers (no raw customer data), product decisions, meetings, metrics, and investors.
   - The work template covers role, stakeholders, projects, one-on-ones, and decisions.

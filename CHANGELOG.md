@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Central hub (roadmap phase 5).
+
+- `lifekernel init --template personal|startup|work [--id]` creates startup and work vaults and adds them to an existing config with their routes.
+- Rollup routes take short, linked outcomes from other vaults; the personal example config gains an `outcome` route, and the weekly review lists the week's outcomes.
+- Vault grants: `LIFEKERNEL_VAULTS` for stdio clients (`lifekernel connect <client> --vaults`), named agent tokens (`lifekernel token create|list|revoke`), and per-vault choices on the OAuth consent page. Each connection runs on a kernel view without its ungranted vaults.
+- `"history": "git"` commits every applied write in the vault's repository; `lifekernel undo <requestId> [--apply]` restores the previous content as a new commit.
+- `lifekernel connect` supports Cursor, VS Code, Windsurf, and Gemini CLI.
+
 Capture and replies (roadmap phase 4).
 
 - Capture: `lifekernel capture`, `POST /v1/capture` (with full write access or the new capture-only `LIFEKERNEL_CAPTURE_TOKEN`), and Telegram messages append to today's inbox note. Redelivered requests are not written twice; concurrent captures are retried.

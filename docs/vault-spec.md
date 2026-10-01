@@ -34,6 +34,12 @@ The starter vault is an English, method-neutral scaffold. Folders exist for plan
 
 Conventions: goals, decisions, and sessions are never deleted; their `status` changes. Tasks live in one project or area note. Unknown values stay blank. Agents follow `system/Method.md` rather than imposing a method, and converse in the user's language while keeping note headings in the template language.
 
+## Vault kinds and templates
+
+A vault's `kind` is `personal`, `startup`, `work`, `project`, or `research`. `lifekernel init --template personal|startup|work` creates one; the startup and work templates ship their routes in `.lifekernel/routes.json`. See [one hub for your life, startup, and work](hub.md).
+
+A route with `"rollup": true` takes short outcomes from other vaults (at most 600 characters, with a `[[wikilink]]`, a URL, or a `vault:path.md` reference) and allows no appends or section edits. A vault with `"history": "git"` commits every applied write in its git repository.
+
 ## Planning fields and tasks (layout version 3)
 
 Daily notes carry optional frontmatter that the daily circle fills only when the user states it: `energy` (1-5), `focus_hours`, `morning_plan` and `circle` (`done` or `skipped`), and `circle_at` (ISO 8601). Weekly reviews are named by ISO week (`reviews/2026-W40.md`).
