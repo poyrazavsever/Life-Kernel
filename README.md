@@ -12,12 +12,18 @@
   <img alt="Status: beta" src="https://img.shields.io/badge/status-beta-A7ADB8">
 </p>
 
+<p align="center">
+  <a href="assets/video/life-kernel-intro.mp4"><img src="assets/video/life-kernel-intro-poster.webp" width="720" alt="Life Kernel in 40 seconds: watch the intro video"></a>
+  <br>
+  <a href="assets/video/life-kernel-intro.mp4">▶ Watch the 40-second intro</a>
+</p>
+
 Life Kernel turns a folder of Markdown notes into the shared memory behind your planning with AI. You talk to Claude, ChatGPT, or Codex for about fifteen minutes each evening; the agent records how the day went, updates tomorrow's plan, and keeps a trail of what you decided and when. Once a week it reviews the week against the capacity you actually showed, and monthly and quarterly reviews keep the larger goals honest. You choose the planning method during onboarding; nothing is imposed.
 
 Underneath, it is a self-hosted context layer built on ordinary Markdown folders and an Obsidian-compatible starter vault. Agents get a small, auditable interface for finding notes, reading source-backed context, and recording completed work through constrained write routes, without unrestricted filesystem access. MCP (local or remote), REST, and a CLI reach the same vault, and reusable skills carry the behavior to every client. Your Markdown remains the source of truth.
 
 > [!IMPORTANT]
-> Life Kernel is an early single-user beta. Local stdio is the recommended mode. Remote HTTP, which ChatGPT and Claude.ai need, should be deployed privately behind TLS; it signs in with OAuth or a bearer token. The OAuth flow is covered by automated tests but has not yet been verified against live ChatGPT and Claude.ai accounts.
+> Life Kernel is an early single-user beta. Local stdio is the recommended mode. Remote HTTP, which ChatGPT and Claude.ai need, should be deployed privately behind TLS; it signs in with OAuth or a bearer token. The OAuth flow is covered by automated tests and has been used live with Claude.ai; ChatGPT has not been verified yet.
 
 ## How it works
 
