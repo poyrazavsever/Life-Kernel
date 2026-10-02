@@ -13,7 +13,7 @@
     "@lifekernel/core": "0.2.0-beta.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "express": "^5.1.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.0"
