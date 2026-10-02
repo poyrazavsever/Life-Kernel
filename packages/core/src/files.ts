@@ -21,10 +21,9 @@ export async function replaceFile(path: string, content: string): Promise<void> 
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
   await writeFile(temporary, content, "utf8");
   try { await rename(temporary, path); } catch (error: unknown) {
-    // Windows refuses to replace a file another program holds open; fall back to an in-place write.
-    if (!["EPERM", "EACCES", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-    await rm(temporary, { force: true });
-    await writeFile(path, content, "utf8");
+    // Fail closed if Windows holds the destination open. An in-place fallback can truncate a note.
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 

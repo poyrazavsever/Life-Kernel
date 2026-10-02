@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: a directory symlink or Windows junction below a vault root no longer lets an agent read or create a note outside the vault; note paths that pass through a link are refused.
+- Fix: a note replacement that Windows refuses (the file is held open) now fails and keeps the original. It used to fall back to writing in place, which could truncate the note.
+- Fix: a write interrupted after the note changed but before the audit event or git commit finished is completed on retry, once, with the original writer and time; the audit event is no longer written twice.
 - Fix: a standalone event stream (`GET /mcp`) is answered with 405. The SDK sends that stream's headers only with its first event, which this server never has, so a proxy waited 100 seconds and answered 524. Found by running the new `scripts/remote-smoke.mjs` against a Cloudflare Tunnel.
 - `scripts/remote-smoke.mjs`: a smoke test with credentials for a deployed server (real MCP client over HTTPS, an idle session, wrong-token and wrong-origin paths, the calendar feed, optional phone capture).
 

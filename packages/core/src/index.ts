@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseEnv } from "node:util";
@@ -9,7 +10,7 @@ import { type VaultGrants } from "./access.js";
 import { buildAgenda } from "./agenda.js";
 import { periodInsights, type Insights } from "./insights.js";
 import { replaceFile, withFileLock } from "./files.js";
-import { commitPaths, contentBefore, type HistoryResult } from "./history.js";
+import { commitPaths, contentBefore, requestCommit, type HistoryResult } from "./history.js";
 import { ritualCalendar } from "./ics.js";
 import { NotificationsSchema } from "./nudges.js";
 import { evaluateRituals, parseQuietHours, RITUAL_FIELDS, RITUAL_IDS, type Outcome, type QuietHours, type RitualId, type RitualStatus } from "./rituals.js";
@@ -144,7 +145,7 @@ export interface KernelOptions {
   now?: () => Date;
 }
 
-interface Receipt { fingerprint: string; state?: "pending" | "applied"; result: PreviewResult & { appliedAt?: string } }
+interface Receipt { fingerprint: string; state?: "pending" | "applied"; context?: WriteContext; result: PreviewResult & { appliedAt?: string; history?: HistoryResult } }
 
 const ROLLUP_MAX_CHARS = 600;
 const ROLLUP_LINK = /\[\[[^\]]+\]\]|https?:\/\/\S+|\b[a-z0-9][a-z0-9-_]*:[^\s]+\.md\b/;
@@ -297,6 +298,17 @@ export function resolveMarkdownPath(root: string, relativePath: string): string 
   const candidate = resolve(root, relativePath);
   if (!isInside(root, candidate)) throw new Error("Path escapes the configured vault root.");
   if (extname(candidate).toLowerCase() !== ".md") throw new Error("Only Markdown notes are allowed.");
+  // The owner chooses the root; no descendant may redirect an agent through a symlink or junction.
+  let current = resolve(root);
+  for (const part of relative(current, candidate).split(sep)) {
+    current = join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink()) throw new Error("Symbolic links and junctions are not allowed in note paths.");
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+      throw error;
+    }
+  }
   return candidate;
 }
 
@@ -823,35 +835,43 @@ export class LifeKernel {
       if (prior && prior.fingerprint !== fingerprint) throw new Error("requestId was already used with different content.");
       if (prior && prior.state !== "pending") return { replayed: true, ...prior.result, appliedAt: prior.result.appliedAt! };
       if (prior && await this.currentSha256(vault, prior.result.path) === prior.result.afterSha256) {
-        return this.recordApplied(request, receiptPath, fingerprint, prior.result, context);
+        return this.recordApplied(request, receiptPath, fingerprint, prior.result, prior.context ?? context);
       }
 
       const proposed = await this.proposed(request);
       if (proposed.preview.policy === "review" && request.approved !== true) {
         throw new Error(`Route ${request.route} requires user approval; preview the write, show it to the user, then apply with approved: true.`);
       }
-      await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "pending", result: proposed.preview } satisfies Receipt, null, 2));
+      await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "pending", result: proposed.preview, context } satisfies Receipt, null, 2));
       await mkdir(dirname(proposed.absolute), { recursive: true });
       if (request.operation === "create") await writeFile(proposed.absolute, proposed.after, { encoding: "utf8", flag: "wx" });
       else await replaceFile(proposed.absolute, proposed.after);
-      const applied = await this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
-      if (vault.history !== "git") return applied;
-      const history = await commitPaths(vault.path, [applied.path], `lifekernel: ${request.operation} ${applied.path}`, {
-        request: request.requestId, route: request.route, source: request.source,
-        ...(context.client?.id ? { client: context.client.id } : context.client?.name ? { client: context.client.name } : {})
-      });
-      // The note is already written; a failed commit is reported, never hidden, and does not undo the write.
-      if (!history.committed) await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify({ event: "history_failed", vaultId: vault.id, path: applied.path, requestId: request.requestId, error: history.error })}\n`, "utf8");
-      return { ...applied, history };
+      return this.recordApplied(request, receiptPath, fingerprint, proposed.preview, context);
     });
   }
 
-  private async recordApplied(request: WriteRequest, receiptPath: string, fingerprint: string, preview: PreviewResult, context: WriteContext): Promise<ApplyResult> {
-    const result = { ...preview, appliedAt: this.now().toISOString() };
-    await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "applied", result } satisfies Receipt, null, 2));
-    const { preview: _content, ...auditable } = result; // the audit log records what changed, never note text
+  private async recordApplied(request: WriteRequest, receiptPath: string, fingerprint: string, preview: Receipt["result"], context: WriteContext): Promise<ApplyResult> {
+    const vault = this.vault(request.vaultId);
+    const result = { ...preview, appliedAt: preview.appliedAt ?? this.now().toISOString() };
+    // Retain the original timestamp and writer while audit/history are still recoverable.
+    await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "pending", result, context } satisfies Receipt, null, 2));
+    const auditPath = join(this.config.stateDir, "audit.jsonl");
+    const log = await readFile(auditPath, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; });
+    const recorded = log.split("\n").some(line => {
+      try { const event = JSON.parse(line); return event.event === "write_applied" && event.requestId === request.requestId && event.vaultId === vault.id; } catch { return false; }
+    });
+    const { preview: _content, history: _history, ...auditable } = result; // never copy note text to audit
     const event = { event: "write_applied", ...auditable, source: request.source, ...(context.client ? { client: context.client } : {}) };
-    await appendFile(join(this.config.stateDir, "audit.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
+    if (!recorded) await appendFile(auditPath, `${log && !log.endsWith("\n") ? "\n" : ""}${JSON.stringify(event)}\n`, "utf8");
+    if (vault.history === "git" && !result.history) {
+      const existing = await requestCommit(vault.path, result.path, request.requestId).catch(() => undefined);
+      result.history = existing ? { committed: true, commit: existing } : await commitPaths(vault.path, [result.path], `lifekernel: ${request.operation} ${result.path}`, {
+        request: request.requestId, route: request.route, source: request.source,
+        ...(context.client?.id ? { client: context.client.id } : context.client?.name ? { client: context.client.name } : {})
+      });
+      if (!result.history.committed) await appendFile(auditPath, `${JSON.stringify({ event: "history_failed", vaultId: vault.id, path: result.path, requestId: request.requestId, error: result.history.error })}\n`, "utf8");
+    }
+    await replaceFile(receiptPath, JSON.stringify({ fingerprint, state: "applied", result, context } satisfies Receipt, null, 2));
     return { replayed: false, ...result };
   }
 
