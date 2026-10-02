@@ -44,8 +44,9 @@ flowchart LR
 
 ## Quick start
 
-Requirements: Node.js 22+ and npm.
+The [quick-start guide](docs/quickstart.md) walks through both paths: five minutes on your computer for Claude Desktop, Claude Code, Codex, and other desktop clients, or about thirty minutes to reach Claude.ai or ChatGPT, and then what the first conversation and each day look like. The short version, on your computer:
 
+Requirements: Node.js 22+ and npm.
 ```bash
 git clone https://github.com/poyrazavsever/Life-Kernel.git
 cd Life-Kernel
@@ -117,6 +118,7 @@ See [Ritual reminders](docs/notifications.md#what-is-sent-where) and the [securi
 
 - [Architecture](docs/architecture.md)
 - [Vault specification](docs/vault-spec.md)
+- [Quick start](docs/quickstart.md)
 - [Connecting clients](docs/clients.md)
 - [Agent integration](docs/agent-integration.md)
 - [Self-hosting](docs/self-hosting.md)
