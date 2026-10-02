@@ -1,5 +1,7 @@
 services:
   lifekernel:
+    # `docker compose pull` fetches the published image; `docker compose up -d --build` builds this checkout instead.
+    image: ghcr.io/poyrazavsever/life-kernel:${LIFEKERNEL_VERSION:-latest}
     build: .
     restart: unless-stopped
     # Run as the user that owns ./vaults so Obsidian on the host can still edit what the server writes.

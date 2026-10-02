@@ -11,7 +11,7 @@ Life Kernel includes a small single-user OAuth 2.1 authorization server. It supp
 
 - A small server (1 GB is enough) and a domain name pointing at it.
 - TLS. The server listens on plain HTTP and expects a reverse proxy to terminate HTTPS.
-- Docker, or Node.js 22.
+- Docker (the published image, or a build of this checkout), or Node.js 22.
 
 ## Configure
 
@@ -29,8 +29,11 @@ Life Kernel includes a small single-user OAuth 2.1 authorization server. It supp
 3. Start the server, then put the proxy in front of it:
 
    ```bash
-   docker compose up -d --build
+   docker compose pull
+   docker compose up -d
    ```
+
+   `pull` fetches the published image; use `docker compose up -d --build` to build this checkout instead.
 
    Use [deploy/Caddyfile.example](../deploy/Caddyfile.example) for Caddy, or any proxy that forwards to `127.0.0.1:8787` and passes the `Host` and `X-Forwarded-*` headers.
 4. Check it from outside:

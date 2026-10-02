@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Docker image published to GitHub Container Registry (`ghcr.io/poyrazavsever/life-kernel`) for amd64 and arm64 whenever a release is published; `docker compose pull` fetches it. Before 1.0, `latest` follows the newest release.
+- A quick-start guide (`docs/quickstart.md`): five minutes on your computer, or about thirty to reach Claude.ai or ChatGPT, plus what the first conversation and each day look like.
+
 - Fix: a directory symlink or Windows junction below a vault root no longer lets an agent read or create a note outside the vault; note paths that pass through a link are refused.
 - Fix: a note replacement that Windows refuses (the file is held open) now fails and keeps the original. It used to fall back to writing in place, which could truncate the note.
 - Fix: a write interrupted after the note changed but before the audit event or git commit finished is completed on retry, once, with the original writer and time; the audit event is no longer written twice.
