@@ -12,11 +12,7 @@
   <img alt="Status: developer preview" src="https://img.shields.io/badge/status-developer_preview-A7ADB8">
 </p>
 
-<p align="center">
-  <a href="assets/video/life-kernel-intro.mp4"><img src="assets/video/life-kernel-intro-poster.webp" width="720" alt="Life Kernel in 40 seconds: watch the intro video"></a>
-  <br>
-  <a href="assets/video/life-kernel-intro.mp4">▶ Watch the 40-second intro</a>
-</p>
+https://github.com/user-attachments/assets/7b79272d-fe93-4ea8-842d-a32584227662
 
 Life Kernel is a self-hosted context layer built on ordinary Markdown folders. It gives AI agents a small, auditable interface for finding notes, reading source-backed context, and recording completed work without unrestricted filesystem access.
 
