@@ -13,6 +13,6 @@
   },
   "dependencies": {
     "@lifekernel/core": "0.2.0-beta.0",
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.31.0"
   }
 }
