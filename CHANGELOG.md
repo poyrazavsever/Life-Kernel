@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The image workflow labels the image with the commit it was built from (a manual run started from `main` had labeled it with `main`'s commit instead of the tag's), and smoke-tests the image it has just pushed. `scripts/docker-smoke.sh` accepts `SMOKE_IMAGE` to test an existing image and no longer needs a built CLI.
 - Docker image published to GitHub Container Registry (`ghcr.io/poyrazavsever/life-kernel`) for amd64 and arm64 whenever a release is published; `docker compose pull` fetches it. Before 1.0, `latest` follows the newest release.
 - A quick-start guide (`docs/quickstart.md`): five minutes on your computer, or about thirty to reach Claude.ai or ChatGPT, plus what the first conversation and each day look like.
 

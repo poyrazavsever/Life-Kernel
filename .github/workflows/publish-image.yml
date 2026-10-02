@@ -48,6 +48,11 @@ jobs:
         with:
           ref: ${{ steps.version.outputs.tag }}
 
+      # A manual run starts from main, so github.sha is not the commit being built; the tag's commit is.
+      - name: Record the commit that is built
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
@@ -64,6 +69,8 @@ jobs:
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=raw,value=latest,enable=${{ steps.version.outputs.latest == 'true' }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
 
       - uses: docker/build-push-action@v7
         with:
@@ -76,6 +83,13 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
           sbom: true
+
+      # Runs the image that was just pushed the way compose does: non-root, bind-mounted git vault, health check,
+      # a 401 without a token, and a write that lands in git history. A failure here means the published image is bad.
+      - name: Smoke test the published image
+        env:
+          SMOKE_IMAGE: ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
+        run: bash scripts/docker-smoke.sh
 
       - name: Summary
         env:

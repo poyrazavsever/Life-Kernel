@@ -9,22 +9,24 @@ realpath_for_docker() { (cd "$1" && (pwd -W 2>/dev/null || pwd)); }
 repo="$(realpath_for_docker "$(dirname "${BASH_SOURCE[0]}")/..")"
 work="$(realpath_for_docker "$(mktemp -d)")"
 name="lifekernel-smoke-$$"
-image="lifekernel:smoke-$$"
+# SMOKE_IMAGE tests an image that already exists (for example the published one) instead of building this checkout.
+image="${SMOKE_IMAGE:-lifekernel:smoke-$$}"
 token="smoke-token-0123456789abcdefghij"
 port="${SMOKE_PORT:-18799}"
 
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
   docker volume rm "$name-state" >/dev/null 2>&1 || true
-  docker image rm "$image" >/dev/null 2>&1 || true
+  [ -n "${SMOKE_IMAGE:-}" ] || docker image rm "$image" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
 
-docker build -q -t "$image" "$repo" >/dev/null
+[ -n "${SMOKE_IMAGE:-}" ] || docker build -q -t "$image" "$repo" >/dev/null
 
 mkdir -p "$work/vaults"
-node "$repo/apps/cli/dist/index.js" init "$work/vaults/personal" >/dev/null
+# The starter vault is copied directly, so this works without building the CLI (init itself is covered by the fixture).
+cp -r "$repo/templates/starter-vault" "$work/vaults/personal"
 (cd "$work/vaults/personal" && git init -q && git add -A && git -c user.name=smoke -c user.email=smoke@example.com commit -q -m init)
 node -e '
   const fs = require("fs");
