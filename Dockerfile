@@ -1,4 +1,4 @@
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 # Install dependencies from the manifests first so source edits do not reinstall them.
 COPY package.json package-lock.json ./
@@ -9,7 +9,7 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM node:22-alpine
+FROM node:26-alpine
 ENV NODE_ENV=production
 # /state is a named volume that must stay writable when the container runs as the host user (LIFEKERNEL_UID),
 # whatever that uid is, so it is world-writable with the sticky bit, like /tmp.
