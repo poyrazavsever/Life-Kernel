@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix: a standalone event stream (`GET /mcp`) is answered with 405. The SDK sends that stream's headers only with its first event, which this server never has, so a proxy waited 100 seconds and answered 524. Found by running the new `scripts/remote-smoke.mjs` against a Cloudflare Tunnel.
+- `scripts/remote-smoke.mjs`: a smoke test with credentials for a deployed server (real MCP client over HTTPS, an idle session, wrong-token and wrong-origin paths, the calendar feed, optional phone capture).
+
 ## 0.2.0-beta.0 (2026-10-01)
 
 Everything built since 0.1.0-alpha.0, in roadmap phases 0 to 7. 0.1.0 is withheld until ChatGPT and Claude.ai have been verified against a live account; the OAuth flow itself is covered by automated tests.

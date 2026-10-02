@@ -68,6 +68,14 @@ npm run cli -- check-remote https://lifekernel.example.com
 
 It makes the requests ChatGPT and Claude.ai make before a user signs in: HTTPS, `/health`, the 401 that points to the resource metadata, the OAuth metadata (code with PKCE S256, refresh tokens, dynamic registration), a registration with each product's callback URL, and the consent page. It needs no credentials. Each run registers two throwaway clients, which expire on their own. A failing line says what to fix.
 
+After the server is running with a token, `scripts/remote-smoke.mjs` checks what happens after sign-in, through whatever sits in front of it:
+
+```bash
+LIFEKERNEL_API_TOKEN=... node scripts/remote-smoke.mjs https://lifekernel.example.com
+```
+
+It connects a real MCP client over HTTPS, checks the instructions, tools, prompts, and latency, holds a session idle for about two minutes (proxies cut idle connections), and checks the wrong-token, wrong-origin, and calendar-feed paths. Add `LIFEKERNEL_CAPTURE_TOKEN` and `--capture` to also test the phone-capture path; it writes one labelled inbox item, so point it at a test vault. Tokens are read from the environment and never printed.
+
 ## Connect
 
 The MCP URL is `https://memory.example.com/mcp`.
@@ -84,6 +92,7 @@ After connecting, say "Set up my Life Kernel vault." The agent loads the onboard
 - **Revoke one client:** disconnect the connector in the client. Its tokens stop working when they expire (one hour) and the refresh token is rotated away.
 - **Revoke everything:** delete `oauth.json` from the state directory and restart; then rotate `LIFEKERNEL_OWNER_SECRET`.
 - **Audit:** `audit.jsonl` records client registration, approvals, denials, failed sign-ins, and every applied write (path, hashes, and size, never note text). It never contains secrets or tokens.
+- **No standalone event stream.** `GET /mcp` answers 405, which the protocol allows for a server that never pushes unrequested messages. Life Kernel never does, and a held-open GET would be cut by a proxy after 100 seconds (Cloudflare's 524). Replies to `POST` requests still stream.
 - **Failed sign-ins:** five wrong owner secrets from one address lock the consent page for 15 minutes.
 - **Back up** the vault and the state directory.
 - **Reminders:** set `LIFEKERNEL_SCHEDULER=on` and an ntfy topic or webhook to send ritual reminders from the server, and `LIFEKERNEL_CALENDAR_TOKEN` for a calendar feed. See [ritual reminders](notifications.md).

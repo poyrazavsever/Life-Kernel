@@ -194,6 +194,22 @@ describe("HTTP surface", () => {
     } finally { await close(); }
   });
 
+  it("answers a standalone event stream request with 405 instead of holding it open", async () => {
+    // A proxy cuts a response that sends no headers for 100 seconds (Cloudflare's 524), and the SDK sends the
+    // stream's headers only with its first event, which this server never has.
+    const { base, close } = await serve();
+    try {
+      const init = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(initialize) });
+      const id = init.headers.get("mcp-session-id")!;
+      const stream = await fetch(`${base}/mcp`, { headers: { ...json, accept: "text/event-stream", "mcp-session-id": id }, signal: AbortSignal.timeout(5000) });
+      expect(stream.status).toBe(405);
+      expect(stream.headers.get("allow")).toBe("POST, DELETE");
+      // The session is unaffected: a POST on it still works.
+      const list = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": id }, body: JSON.stringify(listTools) });
+      expect(list.status).toBe(200);
+    } finally { await close(); }
+  });
+
   it("refuses short tokens", async () => {
     expect(() => createHttpApp(undefined as never, { token: "short" })).toThrow(/24 characters/);
   });

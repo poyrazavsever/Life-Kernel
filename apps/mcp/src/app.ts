@@ -149,6 +149,13 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   // A session belongs to the client that initialized it; idle ones are closed and the table is bounded.
   const sessions = new SessionRegistry(options.sessions);
   app.all("/mcp", ...read, async (req: Request, res: Response) => {
+    // Life Kernel never sends a message the client did not ask for, so there is nothing for a standalone event
+    // stream (GET) to carry. The protocol lets a server say so with 405, and it has to: the SDK only sends the
+    // stream's headers with its first event, so a proxy in front sees no response and cuts the request after
+    // 100 seconds with a 524. Replies to POST requests still stream normally.
+    if (req.method === "GET") {
+      return void res.status(405).set("Allow", "POST, DELETE").json({ jsonrpc: "2.0", error: { code: -32000, message: "This server does not offer a standalone event stream. Send requests with POST." }, id: null });
+    }
     try {
       const clientId = req.auth!.clientId;
       const sessionId = req.header("mcp-session-id");
