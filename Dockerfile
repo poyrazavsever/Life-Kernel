@@ -10,6 +10,10 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
+# These link the published image to this repository, so GitHub shows it under the repo and its license applies.
+LABEL org.opencontainers.image.source="https://github.com/poyrazavsever/Life-Kernel" \
+      org.opencontainers.image.description="Self-hosted, Markdown-native context layer for planning with AI agents" \
+      org.opencontainers.image.licenses="MIT"
 ENV NODE_ENV=production
 # /state is a named volume that must stay writable when the container runs as the host user (LIFEKERNEL_UID),
 # whatever that uid is, so it is world-writable with the sticky bit, like /tmp.
