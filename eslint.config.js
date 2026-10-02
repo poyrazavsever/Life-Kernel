@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 // Type-aware rules need each file in a tsconfig project, and the core project leaves its tests out of the
 // build, so tests get the plain recommended rules.
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "vaults/**", "private-docs/**", ".agents/**", "templates/**", "scripts/**"] },
+  { ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "vaults/**", "private-docs/**", ".agents/**", ".tmp/**", "templates/**", "scripts/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
