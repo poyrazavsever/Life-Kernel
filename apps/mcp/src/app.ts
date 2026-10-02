@@ -11,6 +11,7 @@ import { capture, findAgentToken, grantsFromScopes, notificationsVault, performL
 import { LifeKernelOAuth, type OAuthOptions } from "./oauth.js";
 import { ALL_SCOPES, SCOPE_CAPTURE, SCOPE_READ, SCOPE_WRITE } from "./scopes.js";
 import { createLifeKernelMcp } from "./server.js";
+import { SessionRegistry, type SessionOptions } from "./sessions.js";
 import { VERSION } from "./version.js";
 
 export interface HttpAppOptions {
@@ -24,6 +25,8 @@ export interface HttpAppOptions {
   calendarToken?: string;
   /** A token that can only add items to the inbox, for phone shortcuts and automations. */
   captureToken?: string;
+  /** Idle timeout and upper bound for open MCP sessions. */
+  sessions?: SessionOptions;
 }
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -143,9 +146,16 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
   app.post("/v1/writes/preview", ...write, async (req, res, next) => { try { res.json(await view(req).previewWrite(req.body)); } catch (e) { next(e); } });
   app.post("/v1/writes/apply", ...write, async (req, res, next) => { try { res.json(await view(req).applyWrite(req.body, { client: { id: req.auth!.clientId } })); } catch (e) { next(e); } });
 
-  // A session belongs to the client that initialized it.
-  const sessions = new Map<string, { transport: StreamableHTTPServerTransport; clientId: string }>();
+  // A session belongs to the client that initialized it; idle ones are closed and the table is bounded.
+  const sessions = new SessionRegistry(options.sessions);
   app.all("/mcp", ...read, async (req: Request, res: Response) => {
+    // Life Kernel never sends a message the client did not ask for, so there is nothing for a standalone event
+    // stream (GET) to carry. The protocol lets a server say so with 405, and it has to: the SDK only sends the
+    // stream's headers with its first event, so a proxy in front sees no response and cuts the request after
+    // 100 seconds with a 524. Replies to POST requests still stream normally.
+    if (req.method === "GET") {
+      return void res.status(405).set("Allow", "POST, DELETE").json({ jsonrpc: "2.0", error: { code: -32000, message: "This server does not offer a standalone event stream. Send requests with POST." }, id: null });
+    }
     try {
       const clientId = req.auth!.clientId;
       const sessionId = req.header("mcp-session-id");
@@ -155,12 +165,15 @@ export function createHttpApp(kernel: LifeKernel, options: HttpAppOptions) {
       if (!transport && req.method === "POST" && isInitializeRequest(req.body)) {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id) => { sessions.set(id, { transport: transport!, clientId }); }
+          onsessioninitialized: (id) => { sessions.add(id, { transport: transport!, clientId }); }
         });
-        transport.onclose = () => { if (transport?.sessionId) sessions.delete(transport.sessionId); };
+        transport.onclose = () => { if (transport?.sessionId) sessions.remove(transport.sessionId); };
         await createLifeKernelMcp(view(req)).connect(transport);
       }
-      if (!transport) return void res.status(400).json({ error: "Missing or invalid MCP session." });
+      // An unknown session ID (expired or closed) is a 404, which tells the client to initialize again.
+      if (!transport) return void (sessionId
+        ? res.status(404).json({ jsonrpc: "2.0", error: { code: -32001, message: "Session not found" }, id: null })
+        : res.status(400).json({ error: "Missing or invalid MCP session." }));
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
       if (!res.headersSent) res.status(500).json({ error: error instanceof Error ? error.message : String(error) });

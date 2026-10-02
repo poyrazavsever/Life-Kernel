@@ -60,8 +60,8 @@ describe("MCP tools", () => {
 });
 
 describe("HTTP surface", () => {
-  async function serve() {
-    const app = createHttpApp(await fixture(), { token });
+  async function serve(sessions?: { idleMs?: number; max?: number }) {
+    const app = createHttpApp(await fixture(), { token, ...(sessions ? { sessions } : {}) });
     const server = await new Promise<import("node:http").Server>((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     return { base, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
@@ -153,6 +153,61 @@ describe("HTTP surface", () => {
     } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
     expect(() => createHttpApp(kernel, { token, calendarToken: "short" })).toThrow(/24 characters/);
     expect(() => createHttpApp(kernel, { token, calendarToken: token })).toThrow(/must differ/);
+  });
+
+  const json = { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}` };
+  const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "0" } } };
+  const listTools = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+
+  it("answers an unknown or expired session with 404 so the client initializes again", async () => {
+    const { base, close } = await serve({ idleMs: 40 });
+    try {
+      const unknown = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": "does-not-exist" }, body: JSON.stringify(listTools) });
+      expect(unknown.status).toBe(404);
+      const noSession = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(listTools) });
+      expect(noSession.status).toBe(400);
+
+      const init = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(initialize) });
+      const id = init.headers.get("mcp-session-id")!;
+      expect(init.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const expired = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": id }, body: JSON.stringify(listTools) });
+      expect(expired.status).toBe(404);
+      const again = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(initialize) });
+      expect(again.status).toBe(200);
+    } finally { await close(); }
+  });
+
+  it("closes the least recently used session when too many are open", async () => {
+    const { base, close } = await serve({ max: 2 });
+    try {
+      const ids: string[] = [];
+      for (let index = 0; index < 3; index += 1) {
+        const init = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(initialize) });
+        ids.push(init.headers.get("mcp-session-id")!);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const first = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": ids[0]! }, body: JSON.stringify(listTools) });
+      expect(first.status).toBe(404);
+      const last = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": ids[2]! }, body: JSON.stringify(listTools) });
+      expect(last.status).toBe(200);
+    } finally { await close(); }
+  });
+
+  it("answers a standalone event stream request with 405 instead of holding it open", async () => {
+    // A proxy cuts a response that sends no headers for 100 seconds (Cloudflare's 524), and the SDK sends the
+    // stream's headers only with its first event, which this server never has.
+    const { base, close } = await serve();
+    try {
+      const init = await fetch(`${base}/mcp`, { method: "POST", headers: json, body: JSON.stringify(initialize) });
+      const id = init.headers.get("mcp-session-id")!;
+      const stream = await fetch(`${base}/mcp`, { headers: { ...json, accept: "text/event-stream", "mcp-session-id": id }, signal: AbortSignal.timeout(5000) });
+      expect(stream.status).toBe(405);
+      expect(stream.headers.get("allow")).toBe("POST, DELETE");
+      // The session is unaffected: a POST on it still works.
+      const list = await fetch(`${base}/mcp`, { method: "POST", headers: { ...json, "mcp-session-id": id }, body: JSON.stringify(listTools) });
+      expect(list.status).toBe(200);
+    } finally { await close(); }
   });
 
   it("refuses short tokens", async () => {

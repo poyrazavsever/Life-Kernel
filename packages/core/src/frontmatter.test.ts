@@ -7,7 +7,7 @@ const note = ["---", 'id: "d1"', "# kept comment", 'status: "proposed"', 'decide
 describe("readFrontmatter", () => {
   it("parses YAML, including CRLF and a BOM, and rejects what is not a mapping", () => {
     expect(readFrontmatter(note)).toEqual({ id: "d1", status: "proposed", decided_on: "", tags: ["a"] });
-    expect(readFrontmatter(`﻿${note.replaceAll("\n", "\r\n")}`)).toMatchObject({ status: "proposed" });
+    expect(readFrontmatter(`\uFEFF${note.replaceAll("\n", "\r\n")}`)).toMatchObject({ status: "proposed" });
     expect(readFrontmatter("# No frontmatter")).toBeNull();
     expect(readFrontmatter("---\n- a list\n---\n")).toBeNull();
     expect(readFrontmatter("---\nkey: [unclosed\n---\n")).toBeNull();

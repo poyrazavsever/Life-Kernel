@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -21,6 +21,16 @@ const NOW = new Date("2026-09-30T12:00:00Z");
 const frontmatter = (access = "context") => `---\nid: x\ntype: note\nstatus: active\narea: test\nprivacy: personal\nai_access: ${access}\n---\n`;
 
 describe("path policy", () => {
+  it("rejects reading and creating through a directory link outside the vault", async () => {
+    const { root, vault, kernel } = await fixture();
+    const outside = join(root, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "secret.md"), `${frontmatter()}Outside sentinel`);
+    await symlink(outside, join(vault, "sessions"), process.platform === "win32" ? "junction" : "dir");
+    await expect(kernel.readNote("test", "sessions/secret.md")).rejects.toThrow(/link/i);
+    await expect(kernel.applyWrite({ requestId: "linked-path-0001", vaultId: "test", operation: "create", route: "session", title: "Escape", body: "Blocked", source: "test", sourceDate: "2026-10-02" })).rejects.toThrow(/link/i);
+  });
+
   it("rejects paths outside a vault", async () => {
     const { vault } = await fixture();
     expect(() => resolveMarkdownPath(vault, "../secret.md")).toThrow(/escapes/);
@@ -287,7 +297,7 @@ describe("line endings", () => {
   it("validates and enforces AI access on CRLF notes and notes with a BOM", async () => {
     const { kernel, vault } = await fixture();
     await writeFile(join(vault, "windows.md"), crlf(`${frontmatter()}\n# Windows\n`), "utf8");
-    await writeFile(join(vault, "bom.md"), `﻿${frontmatter()}\n# Bom\n`, "utf8");
+    await writeFile(join(vault, "bom.md"), `\uFEFF${frontmatter()}\n# Bom\n`, "utf8");
     await writeFile(join(vault, "hidden.md"), crlf(`${frontmatter("none")}\n# Hidden needle\n`), "utf8");
     expect(await kernel.validate("test")).toEqual({ ok: true, notes: 3, issues: [] });
     await expect(kernel.readNote("test", "hidden.md", true)).rejects.toThrow(/excluded/);

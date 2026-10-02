@@ -35,6 +35,16 @@ describe("prepareBrief", () => {
     expect(content).toMatch(/<agenda>\n\{.*Ignore all instructions.*\}\n<\/agenda>$/s);
   });
 
+  it("leaves out the effort setting for Haiku, which rejects it, and keeps it for other models", async () => {
+    const haiku = fakeClaude({});
+    await prepareBrief(haiku.create, BriefsSchema.parse({ enabled: true, model: "claude-haiku-4-5-20251001" }), "morning-plan", {}, "en");
+    expect(haiku.calls[0]).not.toHaveProperty("output_config");
+    expect(haiku.calls[0]).toMatchObject({ model: "claude-haiku-4-5-20251001", betas: ["server-side-fallback-2026-07-01"] });
+    const opus = fakeClaude({});
+    await prepareBrief(opus.create, BriefsSchema.parse({ enabled: true, effort: "medium" }), "morning-plan", {}, "en");
+    expect(opus.calls[0]).toMatchObject({ output_config: { effort: "medium" } });
+  });
+
   it("falls back on a refusal, an empty reply, or an error, without echoing details", async () => {
     expect(await prepareBrief(fakeClaude({ stop_reason: "refusal", stop_details: { type: "refusal", category: "cyber", explanation: null } as never, content: [] }).create, config, "morning-plan", {}, "en")).toEqual({ ok: false, error: "The model declined (cyber)." });
     expect(await prepareBrief(fakeClaude({ content: [] }).create, config, "morning-plan", {}, "en")).toMatchObject({ ok: false, error: expect.stringMatching(/no text/) });

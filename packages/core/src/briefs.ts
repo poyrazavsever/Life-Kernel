@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { RITUAL_IDS, type RitualId } from "./rituals.js";
 
@@ -20,10 +20,17 @@ export type BriefsConfig = z.infer<typeof BriefsSchema>;
 /** The one SDK call briefs make, injectable so tests never reach the network. */
 export type CreateMessage = (params: Anthropic.Beta.MessageCreateParamsNonStreaming) => Promise<Anthropic.Beta.BetaMessage>;
 
+/**
+ * The real SDK call. The SDK is a large optional dependency that only briefs use, so it is loaded on the first
+ * brief rather than whenever Life Kernel starts; a vault without briefs never pays for it.
+ */
 export function defaultCreateMessage(config: BriefsConfig, env: NodeJS.ProcessEnv = process.env): CreateMessage {
   const apiKey = env[config.apiKeyEnv];
-  const client = new Anthropic(apiKey ? { apiKey } : {});
-  return (params) => client.beta.messages.create(params);
+  let client: Promise<Anthropic> | undefined;
+  return async (params) => {
+    client ??= import("@anthropic-ai/sdk").then(({ default: Sdk }) => new Sdk(apiKey ? { apiKey } : {}));
+    return (await client).beta.messages.create(params);
+  };
 }
 
 const LANGUAGE = { en: "English", tr: "Turkish" } as const;
@@ -36,6 +43,9 @@ const SYSTEM = [
   "Write at most four short lines of plain text with no headings or markdown: what was planned, what is due or overdue, and one question for the user to decide.",
   "Be warm and plain. Never shame the user about missed days or unfinished work."
 ].join("\n");
+
+/** Models that fail the request when `output_config.effort` is present. */
+const rejectsEffort = (model: string) => /haiku/i.test(model);
 
 export type BriefResult = { ok: true; text: string; model: string } | { ok: false; error: string };
 
@@ -50,7 +60,8 @@ export async function prepareBrief(create: CreateMessage, config: BriefsConfig, 
       max_tokens: 4000,
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      output_config: { effort: config.effort },
+      // Haiku 4.5 rejects the effort setting outright, so a cheaper model must not receive it.
+      ...(rejectsEffort(config.model) ? {} : { output_config: { effort: config.effort } }),
       system: SYSTEM,
       messages: [{ role: "user", content: `Ritual: ${ritual}\nWrite the brief in ${LANGUAGE[locale]}.\n\n<agenda>\n${JSON.stringify(agenda)}\n</agenda>` }]
     });
@@ -59,9 +70,11 @@ export async function prepareBrief(create: CreateMessage, config: BriefsConfig, 
     if (!text) return { ok: false, error: `The model returned no text (stop reason ${response.stop_reason}).` };
     return { ok: true, text: text.length > MAX_BRIEF_CHARS ? `${text.slice(0, MAX_BRIEF_CHARS - 1)}…` : text, model: response.model };
   } catch (error: unknown) {
-    if (error instanceof Anthropic.AuthenticationError) return { ok: false, error: "The Claude API rejected the credentials." };
-    if (error instanceof Anthropic.RateLimitError) return { ok: false, error: "The Claude API rate limit was reached." };
-    if (error instanceof Anthropic.APIError) return { ok: false, error: `The Claude API returned ${error.status ?? "an error"}.` };
+    // The SDK's API errors carry the HTTP status; anything without one never got a response.
+    const status = (error as { status?: unknown } | null)?.status;
+    if (status === 401) return { ok: false, error: "The Claude API rejected the credentials." };
+    if (status === 429) return { ok: false, error: "The Claude API rate limit was reached." };
+    if (typeof status === "number") return { ok: false, error: `The Claude API returned ${status}.` };
     return { ok: false, error: "The Claude API could not be reached." };
   }
 }

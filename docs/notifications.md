@@ -87,7 +87,7 @@ Replies are read by every `tick`, so locally a button press takes effect at the 
 
 ### Buttons on ntfy
 
-In remote mode, set `"actionBaseUrl": "https://<your host>"` under `notifications`. ntfy reminders then carry **Snooze 1h** and **Skip** buttons. Each button is a signed link that works once, expires after a day, and does nothing for an earlier day's reminder. The signing key is generated in the state directory, or set `LIFEKERNEL_ACTION_SECRET` (32+ characters); changing it invalidates every link already sent.
+In remote mode, set `"actionBaseUrl": "https://<your host>"` under `notifications`. ntfy reminders then carry **Snooze 1h** and **Skip** buttons. Each button is a signed link that works once, expires after a day, and does nothing for an earlier day's reminder. Because the buttons are delivered through your ntfy server, whoever can read your topic can also see the links; the worst they can do is snooze or skip that one reminder, and only once. A self-hosted ntfy server with an access token removes the exposure. The signing key is generated in the state directory, or set `LIFEKERNEL_ACTION_SECRET` (32+ characters); changing it invalidates every link already sent.
 
 ## 3. Run the check every few minutes
 
@@ -142,6 +142,8 @@ Life Kernel itself never calls an AI model unless you turn this on. With briefs 
 ```json
 "briefs": { "enabled": true, "rituals": ["morning-plan"], "model": "claude-opus-5-5", "effort": "low", "apiKeyEnv": "ANTHROPIC_API_KEY" }
 ```
+
+A brief is a few lines, so a smaller model is enough and costs less. For example, set `"model": "claude-haiku-4-5-20251001"`: Life Kernel then leaves out the `effort` setting, which Haiku 4.5 rejects. The default is `claude-opus-5-5`, and the prices of both are on the Claude pricing page.
 
 Put your Claude API key in `.env` as `ANTHROPIC_API_KEY`, or rely on an `ant auth login` profile. Briefs appear only on channels with `content: "agenda"`; other channels keep the fixed text. Preview one with `npm run cli -- brief morning-plan`.
 

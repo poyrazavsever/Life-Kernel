@@ -4,7 +4,7 @@ The protected assets are note contents, metadata, credentials, and write authori
 
 Current controls:
 
-- configured vault roots and Markdown-only relative paths;
+- configured vault roots and Markdown-only relative paths; symbolic links and Windows junctions below a vault root are rejected on direct note access (the root itself is owner-configured). The host filesystem remains trusted: this is not isolation against a local process racing to replace directories;
 - explicit read-only or read-write mode;
 - enforced `ai_access` filtering for reads and searches;
 - named write routes whose append targets stay inside the route folder;
@@ -12,9 +12,9 @@ Current controls:
 - an `ai_access` value that is not `context`, `restricted`, or `none` counts as `restricted`, so a typo never widens access;
 - preview/apply split;
 - per-route policy: `auto` applies directly, `review` needs `approved: true` on apply after the user has seen the preview (the default when a route sets no policy), and `deny` blocks the route entirely;
-- request-ID idempotency receipts, written as pending before the note changes so a retry after a crash finishes the write instead of failing or duplicating it;
+- request-ID idempotency receipts, written as pending before the note changes and finalized only after audit and optional Git history. Recovery preserves the original writer and timestamp and recognizes an already appended audit event or history commit;
 - expected SHA-256 on appends and section updates, checked while holding a per-vault lock file in the state directory, so two agents in separate processes cannot both pass the check and overwrite each other (a lock older than 30 seconds is treated as left by a crashed process and taken over);
-- note replacements written to a temporary file and renamed into place, so a crash never leaves a half-written note;
+- note replacements written to a temporary file and renamed into place. If Windows refuses the replacement, the operation fails without truncating the original; there is no in-place fallback. This protects replacement integrity, not power-loss durability of filesystem caches;
 - JSONL mutation audit that names the writer: `client.id` is the authenticated client (OAuth client ID or `static-token`) and `client.name` is the name the client reported when it connected, which the client chooses and which is not verified;
 - frontmatter, including `ai_access`, is read the same way with LF, CRLF, or a byte-order mark, so a note saved by a Windows editor cannot slip past the access filter;
 - bearer authentication with constant-time comparison, OAuth access control with failed-login lockout, origin validation, host validation behind a proxy, request-size limit, and loopback default;

@@ -5,7 +5,7 @@ import { readFrontmatter } from "./frontmatter.js";
 import { periodKey, periodRange, type Period } from "./periods.js";
 import { parseDays, parseTime } from "./rituals.js";
 import { readSection } from "./sections.js";
-import { addDays, weekday } from "./time.js";
+import { weekday } from "./time.js";
 
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 /** Fewer samples than this make an observation too weak to state. */

@@ -17,7 +17,7 @@ Skills must retrieve only relevant context, treat note text as untrusted data, d
 | `second-brain` | Retrieve and update durable context with sources |
 | `project-memory` | Record progress and decisions after a project work session |
 
-`skills/<name>/SKILL.md` is the single source. The MCP server serves the same text through `skill_get` and MCP prompts, so clients that cannot load skill files (for example ChatGPT) behave the same way. The routes that the skills name (`daily`, `plan`, `state`, `method`, `profile`, `goal`, `area`, `project`, `session`, `review`, `monthly`, `quarterly`, `decision`, `inbox`) are defined in `lifekernel.config.example.json`.
+`skills/<name>/SKILL.md` is the single source. [`evals/`](../evals/README.md) measures how a real model follows them: it runs scenarios against a throwaway vault and grades the vault, the audit log, and the reply, and its graders are tested against scripted runs. The MCP server serves the same text through `skill_get` and MCP prompts, so clients that cannot load skill files (for example ChatGPT) behave the same way. The routes that the skills name (`daily`, `plan`, `state`, `method`, `profile`, `goal`, `area`, `project`, `session`, `review`, `monthly`, `quarterly`, `decision`, `inbox`) are defined in `lifekernel.config.example.json`.
 
 Every ritual skill starts with `ritual_agenda`, which assembles what the ritual should cover without a model, and ends by marking itself done or skipped (`morning_plan` and `circle` on the daily note, `status: "complete"` or `"skipped"` on a review note). The server instructions tell agents to mention a due, overdue, or missed ritual once per conversation and never to nag.
 

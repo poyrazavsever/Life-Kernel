@@ -5,7 +5,9 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { briefAgenda, BriefsSchema, capture, createAgentToken, defaultCreateMessage, prepareBrief, formatToday, grantScopes, listAgentTokens, parseVaultGrants, revokeAgentToken, LifeKernel, loadConfig, loadEnvBeside, notificationsVault, pauseNudges, pollTelegram, RITUAL_IDS, sendTestNotification, skipRitual, snoozeRitual, telegramChats, tick, todaySummary, type RitualId } from "@lifekernel/core";
 import { CLIENTS, connectSnippet, isClient } from "./connect.js";
+import { checkRemote } from "./remote-check.js";
 import { manageSchedule, schedulePlan } from "./schedule.js";
+import { splitVaultArg } from "./vault-arg.js";
 
 const argv = process.argv.slice(2);
 // `--config <path>` lets the OS scheduler run the CLI from any directory.
@@ -41,17 +43,38 @@ ${content}
 `);
     return;
   }
+  if (command === "check-remote") {
+    if (!args[0]) throw new Error("Usage: lifekernel check-remote <https://your-host>");
+    const results = await checkRemote(args[0]);
+    for (const result of results) process.stdout.write(`${result.pass ? "PASS" : "FAIL"}  ${result.description}${result.detail && !result.pass ? `
+      ${result.detail}` : ""}
+`);
+    process.exitCode = results.every((result) => result.pass) ? 0 : 1;
+    return;
+  }
   await loadEnvBeside(configPath);
   const kernel = new LifeKernel(await loadConfig(configPath));
   if (command === "doctor") return output(await kernel.doctor());
   if (command === "validate") return output(await kernel.validate(args[0]));
   if (command === "vaults") return output(kernel.listVaults());
   if (command === "search") return output(await kernel.search(args.join(" ")));
-  if (command === "read") return output(await kernel.readNote(args[0] ?? "", args[1] ?? ""));
-  if (command === "list") return output(await kernel.listNotes(args[0] ?? "", { ...(args[1] ? { type: args[1] } : {}), ...(args[2] ? { status: args[2] } : {}) }));
+  // A leading vault ID is optional; without one, the personal vault (or notifications.vaultId) is used.
+  const withVault = () => splitVaultArg(args, kernel.config.vaults.map((vault) => vault.id), notificationsVault(kernel));
+  if (command === "read") {
+    const { vaultId, rest } = withVault();
+    if (!rest[0]) throw new Error("Usage: lifekernel read [vaultId] <path>");
+    return output(await kernel.readNote(vaultId, rest[0]));
+  }
+  if (command === "list") {
+    const { vaultId, rest } = withVault();
+    return output(await kernel.listNotes(vaultId, { ...(rest[0] ? { type: rest[0] } : {}), ...(rest[1] ? { status: rest[1] } : {}) }));
+  }
   if (command === "tasks") return output(await kernel.openTasks(args[0] ? { vaultId: args[0] } : {}));
-  if (command === "rituals") return output(await kernel.ritualStatus(args[0] ?? ""));
-  if (command === "agenda") return output(await kernel.ritualAgenda(args[0] ?? "", args[1] as never, args[2] ? { date: args[2] } : {}));
+  if (command === "rituals") return output(await kernel.ritualStatus(withVault().vaultId));
+  if (command === "agenda") {
+    const { vaultId, rest } = withVault();
+    return output(await kernel.ritualAgenda(vaultId, ritualArg(rest[0]), rest[1] ? { date: rest[1] } : {}));
+  }
   if (command === "migrate") {
     if (!args[0]) throw new Error("Usage: lifekernel migrate <vaultId> [--apply]");
     const starterDir = resolve(here, "../../../templates/starter-vault");
@@ -134,7 +157,7 @@ ${content}
     const request = JSON.parse(await readFile(resolve(invocationRoot, args[0] ?? ""), "utf8"));
     return output(command === "preview" ? await kernel.previewWrite(request) : await kernel.applyWrite(request, { client: { name: "lifekernel-cli" } }));
   }
-  process.stderr.write("Usage: lifekernel <init|connect|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights|brief> [...args] [--config path]\n");
+  process.stderr.write("Usage: lifekernel <init|connect|check-remote|doctor|validate|vaults|search|read|list|tasks|rituals|agenda|preview|apply|migrate|tick|notify|snooze|skip|pause|resume|ics|schedule|capture|today|telegram|token|undo|insights|brief> [...args] [--config path]\n");
   process.exitCode = 1;
 }
 

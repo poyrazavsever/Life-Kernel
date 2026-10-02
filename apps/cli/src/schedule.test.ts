@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { manageSchedule, schedulePlan } from "./schedule.js";
 
@@ -8,7 +12,7 @@ describe("schedulePlan", () => {
     const plan = schedulePlan("win32", { ...paths, node: "C:\\Program Files\\nodejs\\node.exe", cli: "C:\\Life Kernel\\cli.js", config: "C:\\Life Kernel\\lifekernel.config.json", stateDir: "C:\\Life Kernel\\state" }, 5);
     expect(plan.files[0]!.path).toMatch(/lifekernel-tick\.cmd$/);
     const script = plan.files[0]!.content;
-    expect(script.startsWith('@echo off\r\n"C:\\Program Files\\nodejs\\node.exe" "C:\\Life Kernel\\cli.js" tick --config "C:\\Life Kernel\\lifekernel.config.json" > "C:\\Life Kernel\\state')).toBe(true);
+    expect(script.startsWith('@echo off\r\nchcp 65001 >nul\r\n"C:\\Program Files\\nodejs\\node.exe" "C:\\Life Kernel\\cli.js" tick --config "C:\\Life Kernel\\lifekernel.config.json" > "C:\\Life Kernel\\state')).toBe(true);
     expect(script.endsWith('last-tick.json" 2>&1\r\n')).toBe(true);
     expect(plan.install[0]).toMatchObject({ verbatim: true, argv: ["schtasks", "/Create", "/TN", "LifeKernel\\Tick", "/SC", "MINUTE", "/MO", "5", "/TR", expect.stringMatching(/^"\\".*lifekernel-tick\.cmd\\""$/), "/F"] });
     expect(plan.uninstall[0]).toMatchObject({ argv: ["schtasks", "/Delete", "/TN", "LifeKernel\\Tick", "/F"], allowFailure: true });
@@ -42,5 +46,22 @@ describe("manageSchedule", () => {
     const plan = schedulePlan("linux", paths, 5);
     await expect(manageSchedule("install", plan, true)).resolves.toEqual({ action: "install", dryRun: true, files: plan.files, commands: plan.install.map((command) => command.argv) });
     await expect(manageSchedule("status", plan, true)).resolves.toMatchObject({ commands: [["systemctl", "--user", "status", "lifekernel-tick.timer", "--no-pager"]] });
+  });
+});
+
+describe.skipIf(process.platform !== "win32")("Windows wrapper script", () => {
+  it("runs from a path with non-ASCII letters under the Turkish OEM code page", () => {
+    const root = join(mkdtempSync(join(tmpdir(), "lk-")), "Yazılım test");
+    const state = join(root, "state");
+    mkdirSync(state, { recursive: true });
+    const cli = join(root, "cli.js");
+    writeFileSync(cli, 'process.stdout.write("tick-ran")');
+    const plan = schedulePlan("win32", { node: process.execPath, cli, config: join(root, "lifekernel.config.json"), stateDir: state, home: root }, 5);
+    const script = join(state, "lifekernel-tick.cmd");
+    writeFileSync(script, plan.files[0]!.content, "utf8");
+    // 857 is the code page Task Scheduler's console uses on Turkish Windows; without chcp the path is unreadable.
+    const run = spawnSync("cmd.exe", ["/d", "/c", `chcp 857 >nul & "${script}"`], { windowsVerbatimArguments: true });
+    expect(run.status).toBe(0);
+    expect(readFileSync(join(state, "last-tick.json"), "utf8")).toContain("tick-ran");
   });
 });

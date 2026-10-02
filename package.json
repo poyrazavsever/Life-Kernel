@@ -1,18 +1,21 @@
 {
   "name": "life-kernel",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-beta.0",
   "private": true,
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "evals"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build",
-    "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck",
+    "build": "npm --workspace @lifekernel/core run build && npm --workspace @lifekernel/cli run build && npm --workspace @lifekernel/mcp run build && npm --workspace @lifekernel/evals run build",
+    "lint": "eslint .",
+    "coverage": "npm run test --workspaces --if-present -- --coverage --coverage.reporter=text-summary",
+    "typecheck": "npm --workspace @lifekernel/core run typecheck && npm --workspace @lifekernel/cli run typecheck && npm --workspace @lifekernel/mcp run typecheck && npm --workspace @lifekernel/evals run typecheck",
     "test": "npm run test --workspaces --if-present",
     "dev:stdio": "npm --workspace @lifekernel/mcp run dev:stdio",
     "dev:http": "npm --workspace @lifekernel/mcp run dev:http",
@@ -20,9 +23,13 @@
     "fixture": "node scripts/validate-fixture.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.0",
+    "@vitest/coverage-v8": "^5.0.2",
+    "eslint": "^10.11.0",
     "tsx": "^4.20.0",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.71.0",
     "vitest": "^5.0.2"
   }
 }

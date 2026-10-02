@@ -104,7 +104,7 @@ describe("channels", () => {
     expect(windows.env).toMatchObject({ LK_TITLE: hostile.title, LK_BODY: hostile.body, LK_URL: "" });
     const mac = desktopCommand("darwin", hostile, undefined, {});
     expect(mac.args.join(" ")).not.toContain("rm -rf");
-    expect(desktopCommand("linux", hostile, undefined, {}).args).toEqual(["--app-name=Life Kernel", hostile.title, hostile.body]);
+    expect(desktopCommand("linux", hostile, undefined, {}).args).toEqual(["--app-name=Life Kernel", "--", hostile.title, hostile.body]);
   });
 });
 

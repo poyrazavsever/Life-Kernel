@@ -22,7 +22,7 @@ Ask two or three related questions at a time, never a form. Cover, in roughly th
 7. **Privacy.** Topics to keep off-limits (`ai_access: none`) or restricted.
 8. **Method** (below).
 
-Separate what the user stated from what you suggest. Leave unknown values blank. Never infer sensitive facts about health, money, or relationships.
+Separate what the user stated from what you suggest. Leave unknown values blank. Never infer sensitive facts about health, money, or relationships. A rough timing such as "in June" or "in January" is not a date: never choose a day, a month-end, or a year for the user. Leave `target_date` blank (or ask), and write the rough timing in the goal's text.
 
 ## Choosing a planning method
 
@@ -33,7 +33,7 @@ Do not impose one. Offer options with their trade-offs and let the user pick or 
 - **Daily top three + weekly outcomes**: light and outcome-focused; good for people who dislike schedules.
 - **Minimal**: only the daily circle and a weekly review; good for starting small.
 
-Also ask: when (if at all) they want a morning plan, their usual circle time and length, which questions to always or never ask, their weekly review day and time, whether they want monthly and quarterly reviews, quiet hours when nothing should prompt them, what the agent may update without asking (default suggestion: the near-term plan and current state), what it must always confirm (default: profile, accepted decisions, goals), and the tone they want.
+Also ask: when (if at all) they want a morning plan, their usual circle time and length, which questions to always or never ask, their weekly review day and time, whether they want monthly and quarterly reviews, quiet hours when nothing should prompt them, what the agent may update without asking (default suggestion: the near-term plan, current state, ticking tasks the user says they finished, and project next actions), what it must always confirm (default: profile, accepted decisions, goals), and the tone they want.
 
 Record the rhythm as `system/Method.md` frontmatter with `set_frontmatter` on route `method`, so `ritual_status` can tell when each ritual is due. Leave a key blank to turn that ritual off.
 
