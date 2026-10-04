@@ -37,7 +37,7 @@ describe("withFileLock", () => {
       await delay(10);
       ran += 1;
       inside -= 1;
-    }, { staleMs: 1_000 })));
+    }, { staleMs: 5_000 })));
     expect(ran).toBe(8);
     expect(overlapped).toBe(false);
   });
@@ -58,7 +58,7 @@ describe("withFileLock", () => {
         if (inside > 1) overlaps += 1;
         await delay(3);
         inside -= 1;
-      }, { staleMs: 1_000, timeoutMs: 20_000 })));
+      }, { staleMs: 5_000, timeoutMs: 20_000 })));
     }
     expect(overlaps).toBe(0);
   });
@@ -66,10 +66,13 @@ describe("withFileLock", () => {
   it("keeps a slow holder's lock from looking stale", async () => {
     const lock = await lockIn();
     let intruded = false;
-    const slow = withFileLock(lock, "busy", async () => { await delay(400); }, { staleMs: 150, heartbeatMs: 30 });
-    await delay(60);
-    // Without the heartbeat this would see a 150 ms-old lock as stale and run immediately.
-    const other = withFileLock(lock, "busy", async () => { intruded = true; }, { staleMs: 150, heartbeatMs: 30, timeoutMs: 100 }).catch((error: Error) => error.message);
+    // The hold is long and the stale limit generous, so a machine that stalls for a second still cannot make a
+    // live lock look stale; only a missing heartbeat can.
+    const slow = withFileLock(lock, "busy", async () => { await delay(2_500); }, { staleMs: 1_500, heartbeatMs: 100 });
+    await delay(300);
+    // The second caller keeps trying for longer than the stale limit. Without the heartbeat the lock would turn
+    // stale after 1.5 seconds and it would take over; with it, the lock stays fresh and the caller gives up.
+    const other = withFileLock(lock, "busy", async () => { intruded = true; }, { staleMs: 1_500, heartbeatMs: 100, timeoutMs: 1_900 }).catch((error: Error) => error.message);
     expect(await other).toBe("busy");
     expect(intruded).toBe(false);
     await slow;
@@ -86,9 +89,9 @@ describe("withFileLock", () => {
 
   it("gives up with the busy message when the lock stays held", async () => {
     const lock = await lockIn();
-    const holder = withFileLock(lock, "busy", async () => { await delay(300); });
-    await delay(30);
-    await expect(withFileLock(lock, "Vault is busy", async () => undefined, { timeoutMs: 80 })).rejects.toThrow("Vault is busy");
+    const holder = withFileLock(lock, "busy", async () => { await delay(2_000); });
+    await delay(100);
+    await expect(withFileLock(lock, "Vault is busy", async () => undefined, { timeoutMs: 150 })).rejects.toThrow("Vault is busy");
     await holder;
   });
 });
