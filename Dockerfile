@@ -18,9 +18,9 @@ ENV NODE_ENV=production
 # /state is a named volume that must stay writable when the container runs as the host user (LIFEKERNEL_UID),
 # whatever that uid is, so it is world-writable with the sticky bit, like /tmp.
 # git is needed for "history": "git" and `lifekernel undo`. The vault is often a bind mount owned by the host
-# user, which git would otherwise refuse as a "dubious ownership" repository.
+# user, which git would otherwise refuse as a "dubious ownership" repository. Only vaults under /vaults are trusted.
 RUN apk add --no-cache git \
- && git config --system --add safe.directory '*' \
+ && git config --system --add safe.directory '/vaults/*' \
  && mkdir -p /state /vaults \
  && chown node:node /vaults \
  && chmod 1777 /state
