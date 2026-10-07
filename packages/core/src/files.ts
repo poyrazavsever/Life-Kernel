@@ -16,12 +16,33 @@ export interface LockOptions {
   heartbeatMs?: number;
 }
 
+const WINDOWS_RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const WINDOWS_RENAME_ATTEMPTS = 5;
+
+const shouldRetryRename = (error: unknown) =>
+  process.platform === "win32" &&
+  WINDOWS_RENAME_RETRY_CODES.has((error as NodeJS.ErrnoException).code ?? "");
+
 /** Write through a temporary sibling and rename it, so a crash never leaves a half-written file. */
-export async function replaceFile(path: string, content: string): Promise<void> {
+export async function replaceFile(
+  path: string,
+  content: string,
+  renameFile: typeof rename = rename,
+): Promise<void> {
   const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
   await writeFile(temporary, content, "utf8");
-  try { await rename(temporary, path); } catch (error: unknown) {
-    // Fail closed if Windows holds the destination open. An in-place fallback can truncate a note.
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await renameFile(temporary, path);
+        return;
+      } catch (error: unknown) {
+        if (!shouldRetryRename(error) || attempt >= WINDOWS_RENAME_ATTEMPTS) throw error;
+        await delay(Math.min(20 * 2 ** (attempt - 1), 200));
+      }
+    }
+  } catch (error: unknown) {
+    // Fail closed if the destination remains unavailable. An in-place fallback can truncate a note.
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
