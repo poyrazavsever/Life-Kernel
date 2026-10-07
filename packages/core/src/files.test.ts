@@ -1,11 +1,87 @@
-import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rename as fsRename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
-import { withFileLock } from "./files.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { replaceFile, withFileLock } from "./files.js";
 
 const lockIn = async () => join(await mkdtemp(join(tmpdir(), "lifekernel-lock-")), "locks", "v.lock");
+
+describe("replaceFile", () => {
+  const originalPlatform = process.platform;
+  const errno = (code: string) => Object.assign(new Error(code), { code });
+
+  afterEach(() => Object.defineProperty(process, "platform", { value: originalPlatform }));
+
+  const setPlatform = (platform: NodeJS.Platform) =>
+    Object.defineProperty(process, "platform", { value: platform });
+
+  it("retries transient Windows rename failures and eventually replaces the file", async () => {
+    setPlatform("win32");
+    const root = await mkdtemp(join(tmpdir(), "lifekernel-files-"));
+    const path = join(root, "note.md");
+    await writeFile(path, "Original");
+    let attempts = 0;
+
+    await replaceFile(path, "Replacement", async (from, to) => {
+      attempts += 1;
+      if (attempts < 3) throw errno("EBUSY");
+      await fsRename(from, to);
+    });
+
+    expect(attempts).toBe(3);
+    expect(await readFile(path, "utf8")).toBe("Replacement");
+  });
+
+  it("fails closed after Windows rename retries and removes the temporary file", async () => {
+    setPlatform("win32");
+    const root = await mkdtemp(join(tmpdir(), "lifekernel-files-"));
+    const path = join(root, "note.md");
+    await writeFile(path, "Original");
+    let attempts = 0;
+
+    await expect(replaceFile(path, "Replacement", async () => {
+      attempts += 1;
+      throw errno("EACCES");
+    })).rejects.toMatchObject({ code: "EACCES" });
+
+    expect(attempts).toBe(5);
+    expect(await readFile(path, "utf8")).toBe("Original");
+    expect((await readdir(root)).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+
+  it("does not retry non-transient rename failures", async () => {
+    setPlatform("win32");
+    const root = await mkdtemp(join(tmpdir(), "lifekernel-files-"));
+    const path = join(root, "note.md");
+    await writeFile(path, "Original");
+    let attempts = 0;
+
+    await expect(replaceFile(path, "Replacement", async () => {
+      attempts += 1;
+      throw errno("ENOENT");
+    })).rejects.toMatchObject({ code: "ENOENT" });
+
+    expect(attempts).toBe(1);
+    expect((await readdir(root)).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+
+  it("does not retry Windows lock errors on other platforms", async () => {
+    setPlatform("linux");
+    const root = await mkdtemp(join(tmpdir(), "lifekernel-files-"));
+    const path = join(root, "note.md");
+    await writeFile(path, "Original");
+    let attempts = 0;
+
+    await expect(replaceFile(path, "Replacement", async () => {
+      attempts += 1;
+      throw errno("EBUSY");
+    })).rejects.toMatchObject({ code: "EBUSY" });
+
+    expect(attempts).toBe(1);
+    expect((await readdir(root)).some((name) => name.endsWith(".tmp"))).toBe(false);
+  });
+});
 
 describe("withFileLock", () => {
   it("serializes concurrent work", async () => {
